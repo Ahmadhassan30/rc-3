@@ -1,16 +1,15 @@
 <h1 align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./frontend/public/assets/openats-readme-white.png">
-    <img src="./frontend/public/assets/openats-readme-black.png" alt="OpenATS logo" width="240">
+    <source media="(prefers-color-scheme: dark)" srcset="./frontend/public/orbit-logo-dark-v2.png">
+    <img src="./frontend/public/orbit-logo-light.png" alt="Orbit logo" width="180">
   </picture>
 </h1>
 
 <p align="center">
-  <strong>An open-source hiring platform to streamline recruitment and hire faster.</strong>
+  <strong>Orbit — an AI-ready recruitment and talent intelligence platform.</strong>
 </p>
 
 <p align="center">
-  <a href="https://demo.openats.dev"><strong>Live demo</strong></a> ·
   <a href="#features"><strong>Features</strong></a> ·
   <a href="#tech-stack"><strong>Tech stack</strong></a> ·
   <a href="#getting-started"><strong>Getting started</strong></a> ·
@@ -27,9 +26,10 @@
 
 ---
 
-OpenATS is an open-source applicant tracking system for organizations that want to run hiring in
-one clear, shared workspace. It replaces disconnected spreadsheets, inboxes, and point tools with a
-process that follows a candidate from an open role through interview and final decision.
+Orbit is an open-source recruitment and talent intelligence platform for teams that want to run
+hiring in one clear, shared workspace. It replaces disconnected spreadsheets, inboxes, and point
+tools with a workflow that follows a candidate from an open role through interview and final
+decision.
 
 ## Features
 
@@ -37,8 +37,8 @@ process that follows a candidate from an open role through interview and final d
   questions, and publish them on a built-in careers page or embed them on your own website.
 - **Candidate pipeline**: move candidates through your own hiring stages on a drag and drop
   board, with filters, bulk actions and a full stage history.
-- **CV search**: the text of every uploaded CV is read on your server, so you can search across
-  all CVs and see where the words matched.
+- **Private CV processing and search**: uploaded PDFs stay in private storage, their text is read
+  on your server, and recruiters can search across candidate CVs.
 - **Scoring**: each job sets how much application answers, assessments, ratings and interviews
   count, and every candidate gets a total score from them.
 - **Assessments**: build tests with choice and written questions, send them automatically at a
@@ -47,13 +47,14 @@ process that follows a candidate from an open role through interview and final d
   them to the interviewer's Google Calendar with a Meet link, and collect scorecards.
 - **Offers**: write offer letters from templates, send them, and let candidates accept or
   decline online before the offer expires.
-- **Emails**: email candidates from templates, and reword the emails OpenATS sends by itself.
+- **Emails**: email candidates from templates and customize the automated messages Orbit sends.
 - **Team collaboration**: a private discussion for each job's hiring team, star ratings and
   shared notes.
 - **Roles and access**: super admins, hiring managers and interviewers, with interviewers seeing
   only the jobs they are on.
-- **Optional AI notes**: turn on Gemini to get a summary, strengths and gaps for each CV. It is
-  off by default and never part of the score.
+- **AI-ready foundation**: optional Gemini CV notes are feature-gated and never control candidate
+  scores or hiring decisions. Orbit also includes an isolated local embedding benchmark and an
+  evidence-grounded architecture blueprint for future intelligence features.
 
 ## Tech stack
 
@@ -66,7 +67,7 @@ One pnpm workspace with two packages, `frontend` and `backend`, installed from t
 | **Database** | PostgreSQL with [Drizzle ORM](https://orm.drizzle.team) |
 | **Background jobs** | [BullMQ](https://docs.bullmq.io) on Redis, run by a required worker process (CV text, file cleanup, optional AI notes) |
 | **Sign-in** | Built in with [Better Auth](https://www.better-auth.com): email and password, no outside identity service |
-| **Storage** | Cloudflare R2 or any S3-compatible bucket |
+| **Storage** | Private local storage for source development, or Cloudflare R2 / another S3-compatible bucket |
 | **Email** | Any SMTP server ([Mailpit](https://mailpit.axllent.org) locally) |
 | **AI (optional)** | [Gemini](https://ai.google.dev) |
 
@@ -85,7 +86,7 @@ One pnpm workspace with two packages, `frontend` and `backend`, installed from t
 You need Node.js 22+, Docker, pnpm (`npm install -g pnpm`), `make` and `openssl`.
 
 ```sh
-git clone https://github.com/chamals3n4/OpenATS.git && cd OpenATS
+git clone https://github.com/Ahmadhassan30/rc-3.git && cd rc-3
 
 make setup   # installs, creates both .env files, starts Postgres and Redis,
              # runs migrations, seeds the pipeline stages, creates your first admin
@@ -95,7 +96,8 @@ make dev     # API on :8080, worker, and the app on :3000
 Open http://localhost:3000 and sign in with the admin you created. Run `make admin` at any time
 to add a super admin, or to get back in if you are locked out.
 
-A few values can't be generated for you: fill in `R2_*` in `backend/.env` before uploading CVs.
+For source development, set `STORAGE=local` in `backend/.env` to keep CVs in private local storage.
+For R2/S3 storage, configure `R2_*` instead. Never expose CVs through a public static route.
 Email works locally out of the box: everything the app sends lands in Mailpit at http://localhost:8025.
 
 The **background worker is required**. It reads every uploaded CV and removes the files of
@@ -118,7 +120,8 @@ startup with a clear message if a required value is missing.
 | `AUTH_JWKS_URL` / `AUTH_ISSUER` | Checking sign-in tokens. `AUTH_ISSUER` must equal `BETTER_AUTH_URL` |
 | `ENCRYPTION_KEY` | Encrypts stored integration credentials |
 | `FRONTEND_URL` | CORS and links in emails |
-| `R2_*` | File storage |
+| `STORAGE` | `local` for private local source-development storage, or `r2` for S3-compatible storage |
+| `R2_*` | Required when `STORAGE=r2` |
 | `SMTP_*` / `MAIL_FROM` | Email, through any SMTP server |
 | `GEMINI_API_KEY` | Optional. AI notes, also off until turned on in Settings |
 | `GOOGLE_OAUTH_*` | Optional. Lets interviewers connect Google Calendar and Meet |
@@ -129,7 +132,7 @@ startup with a clear message if a required value is missing.
 | --- | --- |
 | `DATABASE_URL` | The same database as the backend |
 | `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` | Sign-in: a secret of 32+ characters, and the app's public URL |
-| `OPENATS_API_URL` / `NEXT_PUBLIC_API_URL` | Where the backend is, from the server and the browser |
+| `OPENATS_API_URL` / `NEXT_PUBLIC_API_URL` | Where the backend is, from the server and the browser. `OPENATS_API_URL` remains for compatibility. |
 | `SMTP_*` / `MAIL_FROM` | Optional. Invite and password reset emails (same values as the backend) |
 
 ## Contributing
