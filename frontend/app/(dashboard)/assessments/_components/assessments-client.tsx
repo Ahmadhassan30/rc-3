@@ -1,0 +1,156 @@
+"use client";
+
+import { useState, useCallback, useMemo } from "react";
+import { toast } from "sonner";
+import {
+  useAssessments,
+  useDeleteAssessment,
+  useInviteToAssessment,
+} from "@/hooks/queries/use-assessments";
+import { useCandidates } from "@/hooks/queries/use-candidates";
+import type { Assessment } from "@/types";
+
+import { AssessmentHeader } from "./assessment-header";
+import { AssessmentCardGrid } from "./card-grid";
+import { AssessmentInviteDialog } from "./invite-dialog";
+import { AssessmentDeleteDialog } from "./delete-dialog";
+import { CreateAssessmentDialog } from "./create-assessment-dialog";
+import { AssignmentsTab } from "./assignments/assignments-tab";
+import { AssessmentsTabs, type AssessmentsTab } from "./assessments-tabs";
+import { generateAssessmentUrl } from "../_lib/utils";
+
+
+export default function AssessmentsPageClient({ tab = "assessments" }: { tab?: AssessmentsTab }) {
+  const { data, isLoading } = useAssessments();
+  const allAssessments = useMemo(() => data?.data ?? [], [data]);
+
+  const { data: candidatesData } = useCandidates();
+  const candidates = candidatesData?.data ?? [];
+
+  const deleteAssessment = useDeleteAssessment();
+  const inviteMutation = useInviteToAssessment();
+
+  const [deleteTarget, setDeleteTarget] = useState<Assessment | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const assessments = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return allAssessments;
+    return allAssessments.filter(
+      (a) =>
+        a.title.toLowerCase().includes(term) ||
+        (a.description ?? "").toLowerCase().includes(term),
+    );
+  }, [allAssessments, searchTerm]);
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!deleteTarget) return;
+    deleteAssessment.mutate(deleteTarget.id, {
+      onSuccess: () => {
+        toast.success("Assessment deleted");
+        setDeleteTarget(null);
+      },
+      onError: (error) => {
+        toast.error(error.message || "Failed to delete assessment");
+        setDeleteTarget(null);
+      },
+    });
+  }, [deleteTarget, deleteAssessment]);
+
+  const [inviteTarget, setInviteTarget] = useState<Assessment | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string>("");
+  const [generatedLink, setGeneratedLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const openInviteDialog = useCallback((assessment: Assessment) => {
+    setInviteTarget(assessment);
+    setSelectedCandidateId("");
+    setGeneratedLink(null);
+    setCopied(false);
+  }, []);
+
+  const handleGenerateLink = useCallback(() => {
+    if (!inviteTarget || !selectedCandidateId) return;
+
+    inviteMutation.mutate(
+      {
+        candidateId: Number(selectedCandidateId),
+        assessmentId: inviteTarget.id,
+      },
+      {
+        onSuccess: (res) => {
+          const url = generateAssessmentUrl(res.data.token);
+          setGeneratedLink(url);
+
+          if (res.didSendInvite === false) {
+            toast.message("They already have an active link");
+          }
+        },
+      },
+    );
+  }, [inviteTarget, selectedCandidateId, inviteMutation]);
+
+  const handleCopyLink = useCallback(() => {
+    if (!generatedLink) return;
+    navigator.clipboard.writeText(generatedLink).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [generatedLink]);
+
+  const handleCloseInvite = useCallback(() => {
+    setInviteTarget(null);
+    setGeneratedLink(null);
+    setCopied(false);
+  }, []);
+
+  return (
+    <div className="flex flex-1 flex-col bg-white dark:bg-neutral-950">
+      <AssessmentHeader
+        tab={tab}
+        onCreate={() => setCreateOpen(true)}
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+      />
+      <AssessmentsTabs tab={tab} />
+
+      {tab === "assignments" ? (
+        <AssignmentsTab />
+      ) : (
+        <AssessmentCardGrid
+          assessments={assessments}
+          isLoading={isLoading}
+          searchTerm={searchTerm}
+          onClearSearch={() => setSearchTerm("")}
+          onCreate={() => setCreateOpen(true)}
+          onDelete={setDeleteTarget}
+        />
+      )}
+
+      <AssessmentInviteDialog
+        assessment={inviteTarget}
+        candidates={candidates}
+        selectedCandidateId={selectedCandidateId}
+        onCandidateChange={setSelectedCandidateId}
+        generatedLink={generatedLink}
+        copied={copied}
+        isPending={inviteMutation.isPending}
+        isError={inviteMutation.isError}
+        error={inviteMutation.error as Error | null}
+        onGenerateLink={handleGenerateLink}
+        onCopyLink={handleCopyLink}
+        onClose={handleCloseInvite}
+      />
+
+      <AssessmentDeleteDialog
+        assessment={deleteTarget}
+        isOpen={!!deleteTarget}
+        isPending={deleteAssessment.isPending}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+      />
+      <CreateAssessmentDialog open={createOpen} onOpenChange={setCreateOpen} />
+    </div>
+  );
+}

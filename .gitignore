@@ -1,0 +1,8 @@
+node_modules
+test-results/
+playwright-report/
+playwright/.cache/
+# Test coverage reports
+coverage/
+# Playwright CLI output (may contain credentials)
+.playwright-cli/

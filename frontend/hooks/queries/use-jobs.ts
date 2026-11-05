@@ -1,0 +1,323 @@
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
+import { clientFetch } from "@/lib/client-fetch";
+import type {
+  Job,
+  JobDetail,
+  CustomQuestion,
+  ScorecardCriterion,
+  HiringTeamMember,
+  HiringTeamMembership,
+  User,
+} from "@/types";
+import type { PaginationInfo } from "@/components/table/table-footer";
+
+export type QuestionOptionInput = {
+  /** Set for existing options */
+  id?: number;
+  label: string;
+  isCorrect: boolean;
+  points: number;
+  isKnockout: boolean;
+  position: number;
+};
+
+export type JobListParams = {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: string;
+  departmentId?: number;
+};
+
+export function useJobs() {
+  return useQuery({
+    queryKey: ["jobs"],
+    queryFn: () => clientFetch<{ data: Job[] }>("/jobs"),
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+/** What deleting these jobs would also delete. Always counted afresh */
+export function useJobDeleteSummary(ids: number[], enabled: boolean) {
+  return useQuery({
+    queryKey: ["jobs", "delete-summary", ids],
+    queryFn: () =>
+      clientFetch<{ data: { candidates: number; offers: number } }>(
+        `/jobs/delete-summary?ids=${ids.join(",")}`,
+      ),
+    enabled: enabled && ids.length > 0,
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
+export function useJobsList(params: JobListParams = {}) {
+  return useQuery({
+    queryKey: ["jobs", "list", params],
+    queryFn: () => {
+      const qs = new URLSearchParams({ page: String(params.page ?? 1), limit: String(params.limit ?? 15) });
+      if (params.search) qs.set("search", params.search);
+      if (params.status) qs.set("status", params.status);
+      if (params.departmentId) qs.set("departmentId", String(params.departmentId));
+      return clientFetch<{ data: Job[]; pagination: PaginationInfo }>(`/jobs?${qs}`);
+    },
+    staleTime: 1000 * 60 * 2,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useBulkDeleteJobs() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: number[]) =>
+      clientFetch<{ count: number }>("/jobs/bulk", { method: "DELETE", body: JSON.stringify({ ids }) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+}
+
+export function useJob(id: number) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ["jobs", id],
+    queryFn: () => clientFetch<{ data: JobDetail }>(`/jobs/${id}`),
+    staleTime: 1000 * 60 * 5,
+    enabled: !!id,
+    initialData: () => {
+      const list = queryClient.getQueryData<{ data: Job[] }>(["jobs"]);
+      const match = list?.data?.find((j) => j.id === id);
+      if (!match) return undefined;
+      return {
+        data: { ...match, pipelineStages: [], hiringTeam: [] } as JobDetail,
+      };
+    },
+    initialDataUpdatedAt: () =>
+      queryClient.getQueryState(["jobs"])?.dataUpdatedAt,
+  });
+}
+
+export function useCreateJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      title: string;
+      departmentId: number;
+      employmentType: string;
+      location?: string;
+      description?: string;
+      skills?: string[];
+      salaryType?: "fixed" | "range" | null;
+      currency?: string | null;
+      payFrequency?: string | null;
+      salaryFixed?: number | null;
+      salaryMin?: number | null;
+      salaryMax?: number | null;
+      status?: Job["status"];
+    }) =>
+      clientFetch<{ data: Job }>("/jobs", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+}
+
+export function useUpdateJob(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      title?: string;
+      departmentId?: number;
+      employmentType?: Job["employmentType"];
+      location?: string | null;
+      description?: string | null;
+      skills?: string[];
+      salaryType?: "fixed" | "range" | null;
+      currency?: string | null;
+      payFrequency?: string | null;
+      salaryFixed?: number | null;
+      salaryMin?: number | null;
+      salaryMax?: number | null;
+      status?: Job["status"];
+    }) =>
+      clientFetch<{ data: Job }>(`/jobs/${jobId}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs", jobId] });
+    },
+  });
+}
+
+export function useDeleteJob() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (jobId: number) =>
+      clientFetch<{ data: Job }>(`/jobs/${jobId}`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+}
+
+export function useCustomQuestions(jobId: number) {
+  return useQuery({
+    queryKey: ["jobs", jobId, "questions"],
+    queryFn: () =>
+      clientFetch<{ data: CustomQuestion[] }>(`/jobs/${jobId}/questions`),
+    enabled: !!jobId,
+  });
+}
+
+export function useCreateQuestion(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      title: string;
+      questionType: "short_answer" | "long_answer" | "url" | "checkbox" | "radio";
+      isRequired: boolean;
+      position: number;
+      options?: QuestionOptionInput[];
+    }) =>
+      clientFetch<{ data: CustomQuestion }>(`/jobs/${jobId}/questions`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", jobId, "questions"] });
+    },
+  });
+}
+
+export function useUpdateQuestion(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      questionId,
+      data,
+    }: {
+      questionId: number;
+      data: {
+        title?: string;
+        questionType?: "short_answer" | "long_answer" | "url" | "checkbox" | "radio";
+        isRequired?: boolean;
+        position?: number;
+        /** Replaces every existing option; send [] to clear them. */
+        options?: QuestionOptionInput[];
+      };
+    }) =>
+      clientFetch<{ data: CustomQuestion }>(
+        `/jobs/${jobId}/questions/${questionId}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(data),
+        },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", jobId, "questions"] });
+    },
+  });
+}
+
+export function useDeleteQuestion(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (questionId: number) =>
+      clientFetch<{ data: CustomQuestion }>(
+        `/jobs/${jobId}/questions/${questionId}`,
+        {
+          method: "DELETE",
+        },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", jobId, "questions"] });
+    },
+  });
+}
+
+export function useHiringTeam(jobId: number) {
+  return useQuery({
+    queryKey: ["jobs", jobId, "team"],
+    queryFn: () => clientFetch<{ data: HiringTeamMember[] }>(`/jobs/${jobId}/team`),
+    enabled: !!jobId,
+  });
+}
+
+export function useAddHiringTeamMember(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { userId: number; role?: string }) =>
+      clientFetch<{ data: HiringTeamMembership }>(`/jobs/${jobId}/team`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", jobId, "team"] });
+    },
+  });
+}
+
+export function useRemoveHiringTeamMember(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: number) =>
+      clientFetch<{ data: HiringTeamMembership | null }>(
+        `/jobs/${jobId}/team/${userId}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", jobId, "team"] });
+    },
+  });
+}
+
+export function useScorecard(jobId: number) {
+  return useQuery({
+    queryKey: ["jobs", jobId, "scorecard"],
+    queryFn: () => clientFetch<{ data: ScorecardCriterion[] }>(`/jobs/${jobId}/scorecard`),
+    enabled: !!jobId,
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+export function useSaveScorecard(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (criteria: { id?: number; name: string }[]) =>
+      clientFetch<{ data: ScorecardCriterion[] }>(`/jobs/${jobId}/scorecard`, {
+        method: "PUT",
+        body: JSON.stringify({ criteria }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", jobId, "scorecard"] });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
+    },
+  });
+}
+
+export type ScoreWeights = {
+  scoreWeightQuestions: number;
+  scoreWeightAssessment: number;
+  scoreWeightRating: number;
+  scoreWeightInterview: number;
+};
+
+export function useSaveScoreWeights(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (weights: ScoreWeights) =>
+      clientFetch<{ data: JobDetail }>(`/jobs/${jobId}`, {
+        method: "PUT",
+        body: JSON.stringify(weights),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", jobId] });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
+    },
+  });
+}

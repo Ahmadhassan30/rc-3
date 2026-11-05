@@ -1,0 +1,94 @@
+"use client";
+
+import {
+  AiScanTextIcon,
+  QuestionIcon,
+  Clock01Icon,
+  TelegramIcon,
+  CoPresentIcon,
+  UserRemove01Icon,
+  Mail01Icon,
+  Quiz03Icon,
+  TaskDone01Icon,
+  TextAlignLeftIcon,
+} from "@hugeicons/core-free-icons";
+
+export function getInitials(first: string, last: string) {
+  return `${first.charAt(0)}${last.charAt(0)}`.toUpperCase();
+}
+
+export const OFFER_STATUS_STYLES: Record<
+  string,
+  { bg: string; text: string; dot: string }
+> = {
+  draft: {
+    bg: "bg-amber-50 dark:bg-amber-950/30",
+    text: "text-amber-600 dark:text-amber-400",
+    dot: "bg-amber-500",
+  },
+  sent: {
+    bg: "bg-blue-50 dark:bg-blue-950/30",
+    text: "text-blue-600 dark:text-blue-400",
+    dot: "bg-blue-500",
+  },
+  viewed: {
+    bg: "bg-cyan-50 dark:bg-cyan-950/30",
+    text: "text-cyan-600 dark:text-cyan-400",
+    dot: "bg-cyan-500",
+  },
+  accepted: {
+    bg: "bg-green-50 dark:bg-green-950/30",
+    text: "text-green-600 dark:text-green-400",
+    dot: "bg-green-500",
+  },
+  declined: {
+    bg: "bg-red-50 dark:bg-red-950/30",
+    text: "text-red-500 dark:text-red-400",
+    dot: "bg-red-500",
+  },
+  expired: {
+    bg: "bg-orange-50 dark:bg-orange-950/30",
+    text: "text-orange-600 dark:text-orange-400",
+    dot: "bg-orange-500",
+  },
+};
+
+export const REJECTION_REASONS = [
+  "Lack of required skills",
+  "Insufficient experience",
+  "Compensation mismatch",
+  "Culture/team fit concerns",
+  "Role requirements changed",
+  "Candidate withdrew",
+  "Other",
+] as const;
+
+export type SectionId =
+  | "ai-analysis"
+  | "answers"
+  | "cv-text"
+  | "history"
+  | "offer"
+  | "interviews"
+  | "rejection"
+  | "email"
+  | "scores"
+  | "assignments";
+
+export const SECTIONS = [
+  { id: "cv-text" as SectionId, label: "CV Summary", icon: TextAlignLeftIcon },
+  // Only when AI analysis is on
+  { id: "ai-analysis" as SectionId, label: "AI analysis", icon: AiScanTextIcon },
+  { id: "answers" as SectionId, label: "Answers", icon: QuestionIcon },
+  { id: "history" as SectionId, label: "Stage History", icon: Clock01Icon },
+  { id: "offer" as SectionId, label: "Offer", icon: TelegramIcon },
+  { id: "interviews" as SectionId, label: "Interviews", icon: CoPresentIcon },
+  { id: "rejection" as SectionId, label: "Rejection", icon: UserRemove01Icon },
+  { id: "email" as SectionId, label: "Send Email", icon: Mail01Icon },
+  {
+    id: "scores" as SectionId,
+    label: "Scores",
+    icon: Quiz03Icon,
+  },
+  { id: "assignments" as SectionId, label: "Assignments", icon: TaskDone01Icon },
+];

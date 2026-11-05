@@ -1,0 +1,34 @@
+"use client";
+
+import { HugeiconsIcon } from "@hugeicons/react";
+import { PlusSignIcon } from "@hugeicons/core-free-icons";
+import { Button } from "@/components/ui/button";
+import { useIsManager } from "@/hooks/use-role";
+
+interface TemplatesHeaderProps {
+  onNewTemplate: () => void;
+}
+
+export function TemplatesHeader({ onNewTemplate }: TemplatesHeaderProps) {
+  const isManager = useIsManager();
+  return (
+    <div className="px-6 pt-4 pb-3 flex items-center justify-between">
+      <h1 className="text-2xl font-medium text-slate-900 dark:text-neutral-100 leading-none">
+        Templates
+      </h1>
+      {isManager && (
+        <Button
+          onClick={onNewTemplate}
+          className="bg-[var(--theme-color)] cursor-pointer hover:bg-[var(--theme-color-hover)] text-white rounded-md h-8 px-4 flex items-center gap-2 border-none shadow-none text-sm font-medium transition-colors"
+        >
+          <HugeiconsIcon
+            icon={PlusSignIcon}
+            className="size-4"
+            strokeWidth={2.5}
+          />
+          <span>New Template</span>
+        </Button>
+      )}
+    </div>
+  );
+}

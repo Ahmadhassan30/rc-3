@@ -1,0 +1,345 @@
+import {
+  useQuery,
+  useQueries,
+  keepPreviousData,
+  useQueryClient,
+  useMutation,
+} from "@tanstack/react-query";
+import { clientFetch } from "@/lib/client-fetch";
+import type {
+  Assessment,
+  AssessmentQuestion,
+  JobAssessment,
+  NewAssessmentQuestion,
+  QuestionType,
+} from "@/types";
+
+export function useAssessments() {
+  return useQuery({
+    queryKey: ["assessments"],
+    queryFn: () => clientFetch<{ data: Assessment[] }>("/assessments"),
+    staleTime: 1000 * 60 * 5,
+  });
+}
+
+export function useAssessment(id: number) {
+  return useQuery({
+    queryKey: ["assessments", id],
+    queryFn: () =>
+      clientFetch<{
+        data: Assessment & {
+          questions: (AssessmentQuestion & {
+            options: {
+              id: number;
+              label: string;
+              isCorrect: boolean;
+              position: number;
+            }[];
+          })[];
+        };
+      }>(`/assessments/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useCreateAssessment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      title: string;
+      description: string | null;
+      timeLimit: number;
+      linkExpiryDays?: number;
+      createdBy?: number;
+      questions?: NewAssessmentQuestion[];
+    }) =>
+      clientFetch<{ data: Assessment }>("/assessments", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["assessments"] });
+    },
+  });
+}
+
+export function useUpdateAssessment(assessmentId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Partial<Assessment>) =>
+      clientFetch<{ data: Assessment }>(`/assessments/${assessmentId}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["assessments"] });
+      queryClient.invalidateQueries({
+        queryKey: ["assessments", assessmentId],
+      });
+    },
+  });
+}
+
+export function useDeleteAssessment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (assessmentId: number) =>
+      clientFetch<{ data: Assessment }>(`/assessments/${assessmentId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["assessments"] });
+    },
+  });
+}
+
+export type AssessmentQuestionKind = "short_answer" | "long_answer" | "multiple_choice" | "radio" | "checkbox";
+
+export function useCreateAssessmentQuestion(assessmentId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      title: string;
+      description?: string | null;
+      questionType: AssessmentQuestionKind;
+      points?: number;
+      position: number;
+      options?: { label: string; isCorrect?: boolean; position: number }[];
+    }) =>
+      clientFetch<{ data: AssessmentQuestion }>(
+        `/assessments/${assessmentId}/questions`,
+        {
+          method: "POST",
+          body: JSON.stringify(data),
+        },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["assessments", assessmentId],
+      });
+    },
+  });
+}
+
+export function useUpdateAssessmentQuestion(assessmentId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      questionId,
+      data,
+    }: {
+      questionId: number;
+      data: {
+        title?: string;
+        description?: string | null;
+        questionType?: AssessmentQuestionKind;
+        points?: number;
+        position?: number;
+        options?: { label: string; isCorrect?: boolean; position: number }[];
+      };
+    }) =>
+      clientFetch<{ data: AssessmentQuestion }>(
+        `/assessments/${assessmentId}/questions/${questionId}`,
+        {
+          method: "PUT",
+          body: JSON.stringify(data),
+        },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["assessments", assessmentId],
+      });
+    },
+  });
+}
+
+export function useDeleteAssessmentQuestion(assessmentId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (questionId: number) =>
+      clientFetch<{ data: AssessmentQuestion }>(
+        `/assessments/${assessmentId}/questions/${questionId}`,
+        {
+          method: "DELETE",
+        },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["assessments", assessmentId],
+      });
+    },
+  });
+}
+
+export function useJobAssessments(jobId: number) {
+  return useQuery({
+    queryKey: ["jobs", jobId, "assessments"],
+    queryFn: () =>
+      clientFetch<{
+        data: {
+          id: number;
+          assessmentId: number;
+          triggerStageId: number;
+          passMark: number;
+          createdAt: string;
+        }[];
+      }>(`/jobs/${jobId}/assessments`),
+    enabled: !!jobId,
+  });
+}
+
+export function useAttachAssessment(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { assessmentId: number; triggerStageId: number; passMark?: number }) =>
+      clientFetch<{ data: JobAssessment }>(`/jobs/${jobId}/assessments`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["jobs", jobId, "assessments"],
+      });
+    },
+  });
+}
+
+export function useUpdatePassMark(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ attachmentId, passMark }: { attachmentId: number; passMark: number }) =>
+      clientFetch<{ data: JobAssessment }>(`/jobs/${jobId}/assessments/${attachmentId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ passMark }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["jobs", jobId, "assessments"] });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
+    },
+  });
+}
+
+export function useDetachAssessment(jobId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (attachmentId: number) =>
+      clientFetch<{ data: JobAssessment }>(
+        `/jobs/${jobId}/assessments/${attachmentId}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["jobs", jobId, "assessments"],
+      });
+    },
+  });
+}
+
+export function useCandidateAssessments(candidateId: number) {
+  return useQuery({
+    queryKey: ["candidate-assessments", candidateId],
+    queryFn: () =>
+      clientFetch<{
+        data: {
+          id: number;
+          assessmentId: number;
+          assessmentTitle: string;
+          token: string;
+          status: string;
+          scorePercentage: number | null;
+          passed: boolean | null;
+          startedAt: string | null;
+          completedAt: string | null;
+          expiresAt: string;
+        }[];
+      }>(`/assessment-execution/candidate/${candidateId}`),
+    enabled: !!candidateId,
+    staleTime: 1000 * 60 * 2,
+  });
+}
+
+export function useInviteToAssessment() {
+  return useMutation({
+    mutationFn: ({
+      candidateId,
+      assessmentId,
+      expiryDays = 7,
+    }: {
+      candidateId: number;
+      assessmentId: number;
+      expiryDays?: number;
+    }) =>
+      clientFetch<{
+        data: { token: string };
+        didSendInvite?: boolean;
+      }>(`/assessment-execution/invite`, {
+        method: "POST",
+        body: JSON.stringify({ candidateId, assessmentId, expiryDays }),
+      }),
+  });
+}
+
+export function useAttemptResults(attemptId: number, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["attempt-results", attemptId],
+    queryFn: () =>
+      clientFetch<{
+        data: {
+          attempt: {
+            id: number;
+            candidateId: number;
+            assessmentId: number;
+            status: string;
+            startedAt: string | null;
+            completedAt: string | null;
+            scoreRaw: number | null;
+            scoreTotal: number | null;
+            scorePercentage: number | null;
+            passed: boolean | null;
+            assessmentTitle: string;
+            assessmentDescription: string | null;
+            candidateName: string;
+            candidateEmail: string;
+          };
+          /** Written answers waiting for grading */
+          pendingReview: number;
+          questions: {
+            id: number;
+            title: string;
+            description: string | null;
+            questionType: QuestionType;
+            points: number;
+            position: number;
+            options: {
+              id: number;
+              label: string;
+              isCorrect: boolean;
+            }[];
+            answer: {
+              answerText: string | null;
+              selectedOptionIds: number[];
+              pointsEarned: number | string | null;
+            } | null;
+          }[];
+        };
+      }>(`/assessment-execution/attempts/${attemptId}/results`),
+    enabled: (options?.enabled ?? true) && !!attemptId,
+  });
+}
+
+/** Points for one written answer */
+export function useGradeAnswer(attemptId: number) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ questionId, points }: { questionId: number; points: number }) =>
+      clientFetch(`/assessment-execution/attempts/${attemptId}/grade`, {
+        method: "PUT",
+        body: JSON.stringify({ questionId, points }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["attempt-results", attemptId] });
+      queryClient.invalidateQueries({ queryKey: ["candidate-assessments"] });
+      queryClient.invalidateQueries({ queryKey: ["candidates"] });
+    },
+  });
+}

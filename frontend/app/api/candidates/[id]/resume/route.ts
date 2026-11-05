@@ -1,0 +1,43 @@
+import { serverApiUrl } from "@/lib/api-url";
+import { NextResponse } from "next/server";
+import { getApiToken } from "@/lib/auth/session";
+
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ id: string }> | { id: string } },
+) {
+  try {
+    const { id } = await Promise.resolve(context.params);
+    if (!id) {
+      return NextResponse.json({ error: "Candidate ID is required" }, { status: 400 });
+    }
+
+    const token = await getApiToken();
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const response = await fetch(`${serverApiUrl()}/api/candidates/${id}/resume`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!response.ok || !response.body) {
+      return NextResponse.json(
+        { error: "Unable to load resume" },
+        { status: response.status },
+      );
+    }
+
+    return new NextResponse(response.body, {
+      headers: {
+        "Content-Type": response.headers.get("content-type") ?? "application/pdf",
+        // File name chosen by the backend
+        "Content-Disposition": response.headers.get("content-disposition") ?? "inline",
+        "Cache-Control": "private, max-age=300",
+      },
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unable to load resume";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

@@ -1,0 +1,706 @@
+export type Job = {
+  id: number;
+  slug: string;
+  title: string;
+  departmentId: number;
+  employmentType:
+    | "full_time"
+    | "part_time"
+    | "contract"
+    | "internship"
+    | "freelance";
+  location: string | null;
+  description: string | null;
+  salaryType: "fixed" | "range" | null;
+  currency: string | null;
+  payFrequency: string | null;
+  salaryFixed: string | null;
+  salaryMin: string | null;
+  salaryMax: string | null;
+  status: "draft" | "inactive" | "published" | "closed" | "archived";
+  createdBy: number;
+  createdAt: string;
+  updatedAt: string;
+  skills: string[];
+  /** How much each score part counts for this job. Relative, not necessarily a sum of 100. */
+  scoreWeightQuestions?: number;
+  scoreWeightAssessment?: number;
+  scoreWeightRating?: number;
+  scoreWeightInterview?: number;
+};
+
+export type PipelineStage = {
+  id: number;
+  jobId: number;
+  name: string;
+  position: number;
+  stageType: "screening" | "interview" | "offer";
+  sourceTemplateId: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type JobDetail = Job & {
+  pipelineStages: PipelineStage[];
+  hiringTeam: { id: number; jobId: number; userId: number; addedAt: string }[];
+};
+
+export type CurrentUser = {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  avatarUrl: string | null;
+  role: "super_admin" | "hiring_manager" | "interviewer";
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CustomQuestion = {
+  id: number;
+  jobId: number;
+  title: string;
+  questionType: "short_answer" | "long_answer" | "url" | "checkbox" | "radio";
+  isRequired: boolean;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+  options: {
+    id: number;
+    questionId: number;
+    label: string;
+    isCorrect: boolean;
+    /** Points for picking this option (the Questions score). */
+    points: number;
+    /** Picking it flags the candidate as not meeting the requirements. */
+    isKnockout: boolean;
+    position: number;
+  }[];
+};
+
+export type ChatMessage = {
+  id: number;
+  message: string | null;
+  senderId: number;
+  sentAt: string;
+  isSystemMessage: boolean;
+  senderName: string | null;
+  senderAvatar: string | null;
+};
+
+export type Department = {
+  id: number;
+  name: string;
+  companyId: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Company = {
+  id: number;
+  name: string;
+  email: string;
+  website: string | null;
+  phone: string | null;
+  address: string | null;
+  description: string | null;
+  logoUrl: string | null;
+  /** IANA name, such as "Asia/Colombo". Dates and times in emails are written in this zone. */
+  timeZone: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AssessmentOption = {
+  id: number;
+  questionId: number;
+  label: string;
+  isCorrect: boolean;
+  position: number;
+};
+
+// Mirrors the `question_type` enum in the database.
+export type QuestionType =
+  | "short_answer"
+  | "long_answer"
+  | "url"
+  | "checkbox"
+  | "radio"
+  | "multiple_choice";
+
+export type AssessmentQuestion = {
+  id: number;
+  assessmentId: number;
+  title: string;
+  description: string;
+  questionType: QuestionType;
+  points: number;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+  options?: AssessmentOption[];
+};
+
+export type Assessment = {
+  id: number;
+  title: string;
+  description: string | null;
+  timeLimit: number;
+  linkExpiryDays: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Sent by the list endpoint, which doesn't include the questions themselves. */
+  questionCount?: number;
+  questions?: AssessmentQuestion[];
+};
+
+export type JobAssessment = {
+  id: number;
+  jobId?: number;
+  assessmentId: number;
+  triggerStageId: number | null;
+  /** Percentage needed to pass. */
+  passMark: number;
+  createdAt: string;
+};
+
+export type ScorecardCriterion = {
+  id: number;
+  jobId: number;
+  name: string;
+  position: number;
+};
+
+export type CandidateRejection = {
+  /** Only on the reply to a reject request: the candidate was rejected but the email did not go out. */
+  emailFailed?: boolean;
+  id: number;
+  candidateId: number;
+  jobId: number;
+  fromStageId: number | null;
+  rejectedBy: number | null;
+  reason: string | null;
+  internalNote: string | null;
+  templateId: number | null;
+  emailStatus: "not_sent" | "draft" | "sent";
+  sentAt: string | null;
+  rejectedAt: string;
+};
+
+export type InterviewTimeSlot = { datetime: string; selected: boolean };
+
+export type StageType = "screening" | "interview" | "offer";
+
+export type CandidateInterview = {
+  id: number;
+  candidateId: number;
+  stageId: number;
+  jobId: number;
+  eventName: string | null;
+  eventType: string | null;
+  meetingUrl: string | null;
+  bodyText: string | null;
+  status: string;
+  scheduledAt: string | null;
+  durationMinutes: number | null;
+  notes: string | null;
+  outcome: "pending" | "pass" | "fail";
+  timeSlots: InterviewTimeSlot[] | null;
+  publicToken: string | null;
+  // Joined from the pipeline stage, not stored on the interview row.
+  stageType: StageType | null;
+  createdBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Candidate = {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  /** Whether a CV is on file. The file itself is only served by /api/candidates/:id/resume. */
+  hasResume: boolean;
+  jobId: number;
+  currentStageId: number | null;
+  status: "active" | "rejected" | "offered" | "hired" | "withdrawn";
+  appliedAt: string;
+  updatedAt: string;
+  stageName: string | null;
+  jobTitle: string | null;
+  /** Score parts, 0-100. Postgres `numeric` reaches us as a string; null until that part exists. */
+  questionsScore?: string | null;
+  assessmentScore?: string | null;
+  ratingScore?: string | null;
+  interviewScore?: string | null;
+  totalScore?: string | null;
+  /** How many of the job's weighted parts have a score yet. */
+  scoredParts?: number;
+  /** How many parts the job weights above zero: the "4" in "2 of 4 scored". */
+  weightedParts?: number;
+  /** Picked a knockout answer. */
+  knockedOut?: boolean;
+  /** Latest finished assessment against its pass mark; null if none finished. */
+  assessmentPassed?: boolean | null;
+  /** A test link ran out unused. It counts as 0 and is flagged. */
+  assessmentExpired?: boolean;
+  /**
+   * Sent with search results: where in the CV the search was found, with the matched words
+   * between [[ and ]]. Null when the candidate was found by name or email only.
+   */
+  cvSnippet?: string | null;
+};
+
+/** What the pipeline board needs about a candidate: the light row from `/candidates/jobs/:id/board`. */
+export type BoardCandidate = Pick<
+  Candidate,
+  | "id"
+  | "firstName"
+  | "lastName"
+  | "email"
+  | "jobId"
+  | "currentStageId"
+  | "status"
+  | "appliedAt"
+  | "updatedAt"
+  | "totalScore"
+  | "scoredParts"
+  | "weightedParts"
+  | "knockedOut"
+  | "assessmentPassed"
+  | "assessmentExpired"
+> & {
+  /** When the candidate entered their current stage. Null when there is no record of it. */
+  stageEnteredAt: string | null;
+};
+
+/** Mirrors API `stageAutomation` on candidate stage move. */
+export type StageAutomationFlags = {
+  assessmentInvite?: "sent" | "skipped_active_invite";
+  assignmentInvite?: "sent" | "skipped_active_invite" | "failed";
+};
+
+/** Notes written by the AI for a person to read. There is no score, rating or verdict. */
+export type AiSummary = {
+  quickSummary: string;
+  strengths: string[];
+  gaps: string[];
+};
+
+/**
+ * The AI's reading of a candidate's CV. Only sent while AI CV analysis is turned on in Settings;
+ * otherwise the candidate has `cvAnalysis: null`.
+ */
+export type CandidateCvAnalysisPayload = {
+  status: "pending" | "done" | "failed";
+  /** The job's required skills that the CV shows, and the ones it does not. */
+  matchedSkills: string[] | null;
+  missingSkills: string[] | null;
+  aiSummary: AiSummary | null;
+  errorMessage: string | null;
+  updatedAt: string;
+};
+
+/** Whether candidates' CVs are sent to Google Gemini, as set in Settings. */
+export type AiSettings = {
+  /** What was chosen in Settings. */
+  cvAnalysisEnabled: boolean;
+  /** Whether the server has a Gemini API key. Without one the setting cannot be turned on. */
+  geminiConfigured: boolean;
+  /** Both of the above. CVs are analysed, and the analysis shown, only when this is true. */
+  active: boolean;
+};
+
+/**
+ * The text read from a candidate's CV on the server. `empty` means the file was read but holds no
+ * usable text (a scan, or an image-only CV), so the candidate cannot be found by CV search.
+ */
+export type CandidateCvText = {
+  status: "pending" | "done" | "empty" | "failed";
+  method: string | null;
+  text: string | null;
+  pageCount: number | null;
+  /** The CV split by its headings. `header` is the text above the first heading. */
+  sections?: { key: string; heading: string | null; text: string }[] | null;
+  /** Estimated from the date ranges in the Experience section. Null means not found, not zero. */
+  experienceYears?: number | null;
+  /** The highest level named in the Education section; an estimate. */
+  educationLevel?: "secondary" | "diploma" | "bachelor" | "master" | "doctorate" | null;
+  contacts?: { emails: string[]; phones: string[]; links: string[] } | null;
+};
+
+export type CandidateDetail = Candidate & {
+  /** Null when the candidate has no CV, or it was uploaded before CV text was read. */
+  cvText?: CandidateCvText | null;
+  weights?: { questions: number; assessment: number; rating: number; interview: number };
+  /** How far apart the interviewers' scorecards were (0-100); null before any, or while hidden. */
+  interviewSpread?: { count: number; min: number; max: number } | null;
+  ratings?: { userId: number; rating: number }[];
+  cvAnalysis: CandidateCvAnalysisPayload | null;
+  answers: {
+    id: number;
+    candidateId: number;
+    questionId: number;
+    questionTitle?: string | null;
+    /** Where the question sits on the application form (sent by newer API versions). */
+    questionPosition?: number | null;
+    questionType?: string | null;
+    answerText: string | null;
+    createdAt: string;
+  }[];
+  selections: {
+    id: number;
+    candidateId: number;
+    questionId: number;
+    questionTitle?: string | null;
+    questionPosition?: number | null;
+    questionType?: string | null;
+    optionId: number;
+    optionLabel?: string | null;
+    createdAt: string;
+  }[];
+  history: {
+    id: number;
+    candidateId: number;
+    stageId: number;
+    movedBy: number | null;
+    movedAt: string;
+  }[];
+  activities: CandidateActivity[];
+  offer: Offer | null;
+  rejections: CandidateRejection[];
+  interviews: CandidateInterview[];
+};
+
+export type User = {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: "super_admin" | "hiring_manager" | "interviewer";
+  avatarUrl: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TemplateBodyBlock = {
+  type: "heading" | "text" | "button" | "image";
+  content: string;
+};
+
+// Email templates store a plain HTML string; event templates store a ContentBlock[]-style array.
+export type TemplateBody = TemplateBodyBlock[] | string;
+
+export type Template = {
+  id: number;
+  name: string;
+  type: "email" | "event";
+  subject: string;
+  bodyJson: TemplateBody;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Offer = {
+  id: number;
+  candidateId: number;
+  jobId: number;
+  templateId: number | null;
+  status: "draft" | "sent" | "viewed" | "accepted" | "declined" | "expired";
+  salary: number | string | null;
+  currency: string | null;
+  payFrequency?: "hourly" | "daily" | "weekly" | "monthly" | "yearly" | null;
+  employmentType:
+    | "full_time"
+    | "part_time"
+    | "contract"
+    | "internship"
+    | "freelance"
+    | null;
+  startDate: string | null;
+  /** When the offer stops being open to accept or decline. Null means it never runs out. */
+  expiresAt?: string | null;
+  expiryDate?: string | null;
+  reportingManager: string | null;
+  benefits: string | null;
+  offerLetterHtml: string | null;
+  renderedHtml?: string | null;
+  sentAt: string | null;
+  viewedAt: string | null;
+  acceptedAt: string | null;
+  declinedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// Payload shape for creating questions, as sent by the assessment builder.
+export type NewAssessmentQuestion = {
+  title: string;
+  description: string | null;
+  questionType: Exclude<QuestionType, "url">;
+  points: number;
+  position: number;
+  options?: { label: string; isCorrect: boolean; position: number }[];
+};
+
+/**
+ * One person on a job's hiring team. `id` is the membership row; `userId` is the person, and
+ * is what adding and removing work with.
+ */
+export type HiringTeamMember = {
+  id: number;
+  jobId: number;
+  userId: number;
+  addedAt: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  avatarUrl: string | null;
+  role: User["role"];
+  /** The person who created the job. They cannot be removed from its team. */
+  isJobCreator: boolean;
+};
+
+export type HiringTeamMembership = {
+  id: number;
+  jobId: number;
+  userId: number;
+  addedAt: string;
+};
+
+// The offer list and detail endpoints join the candidate and job rows.
+export type OfferWithRelations = Offer & {
+  candidate?: { firstName: string; lastName: string } | null;
+  job?: { id: number; title: string } | null;
+};
+
+export type InterviewListItem = {
+  id: number;
+  candidateId: number;
+  stageId: number;
+  jobId: number;
+  scheduledAt: string | null;
+  durationMinutes: number | null;
+  notes: string | null;
+  outcome: "pending" | "pass" | "fail";
+  status: string;
+  eventName: string | null;
+  eventType: string | null;
+  meetingUrl: string | null;
+  bodyText: string | null;
+  createdBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+  candidateName: string;
+  candidateEmail: string | null;
+  jobTitle: string | null;
+  stageName: string | null;
+  stageType: string | null;
+  interviewerId: number | null;
+  /** Whether the signed-in user has written a scorecard for it */
+  myScorecardSubmitted: boolean;
+};
+
+export type CandidateActivity = {
+  id: number;
+  candidateId: number;
+  jobId: number;
+  offerId: number | null;
+  stageId: number | null;
+  actorId: number | null;
+  eventType:
+    | "offer_created"
+    | "offer_updated"
+    | "offer_sent"
+    | "offer_viewed"
+    | "offer_accepted"
+    | "offer_declined"
+    | "candidate_hired";
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  stage?: {
+    id: number;
+    name: string;
+    stageType: "screening" | "interview" | "offer";
+  } | null;
+};
+
+export type PublicOfferView = {
+  id: number;
+  status: "draft" | "sent" | "viewed" | "accepted" | "declined" | "expired";
+  salary: number | string | null;
+  currency: string | null;
+  employmentType:
+    | "full_time"
+    | "part_time"
+    | "contract"
+    | "internship"
+    | "freelance"
+    | null;
+  startDate: string | null;
+  expiresAt: string | null;
+  reportingManager: string | null;
+  benefits: string | null;
+  offerLetterHtml: string | null;
+  sentAt: string | null;
+  viewedAt: string | null;
+  acceptedAt: string | null;
+  declinedAt: string | null;
+  candidateName: string;
+  candidateEmail: string;
+  jobTitle: string;
+};
+
+export type AnalyticsReport = {
+  summary: {
+    totalCandidates: number;
+    /** Applications received in the period. */
+    newCandidates: number;
+    /** Change against the previous period, null when there was nothing to compare with. */
+    totalCandidatesDeltaPct: number | null;
+    openPositions: number;
+    openPositionsDelta: number;
+    /** Null when no offer was accepted in the period. */
+    avgTimeToHireDays: number | null;
+    /** Days faster than the previous period (negative is slower), null without both periods. */
+    avgTimeToHireDeltaDays: number | null;
+    /** Offers sent in the period. */
+    offersSent: number;
+    /** Null when no offer was sent in the period. */
+    offerAcceptanceRate: number | null;
+    offerAcceptanceRateDeltaPct: number | null;
+  };
+  pipelineReport: {
+    stage: string;
+    current: number;
+    previous: number;
+  }[];
+  candidateVolume: {
+    date: string;
+    applications: number;
+    hires: number;
+  }[];
+  sourceOfCandidates: {
+    name: string;
+    value: number;
+  }[];
+  timeToHireByDepartment: {
+    dept: string;
+    days: number;
+  }[];
+  offerTrends: {
+    month: string;
+    sent: number;
+    accepted: number;
+  }[];
+};
+
+/** What needs a hiring manager's attention right now. Managers only. */
+export type AttentionReport = {
+  newApplicants: { last24h: number };
+  offersAwaitingAnswer: {
+    count: number;
+    items: {
+      offerId: number;
+      candidateId: number;
+      candidateName: string;
+      jobTitle: string;
+      sentAt: string;
+    }[];
+  };
+  upcomingInterviews: {
+    count: number;
+    items: {
+      interviewId: number;
+      candidateId: number;
+      candidateName: string;
+      jobTitle: string;
+      startsAt: string;
+    }[];
+  };
+  stalledCandidates: {
+    count: number;
+    afterDays: number;
+    items: {
+      candidateId: number;
+      candidateName: string;
+      jobTitle: string;
+      stageName: string;
+      days: number;
+    }[];
+  };
+};
+
+export type AnalyticsExportPayload = {
+  format: "csv" | "json";
+  fileName: string;
+  mimeType: string;
+  content: string;
+};
+
+/** An email sent to a candidate from the Send Email tab. */
+export type CandidateEmail = {
+  id: number;
+  candidateId: number;
+  subject: string;
+  bodyHtml: string;
+  recipientEmail: string;
+  /** What the email was for, such as "manual", "rejection" or "interview_confirmed". */
+  kind: string;
+  status: "sent" | "failed";
+  sentAt: string;
+  sentByName: string | null;
+};
+
+export type AssignmentResource = { label: string; url: string };
+
+export type SubmissionFieldType = "link" | "short_text" | "long_text";
+
+/** One question on the form a candidate fills in to hand in their work. */
+export type SubmissionField = {
+  id: string;
+  label: string;
+  type: SubmissionFieldType;
+  required: boolean;
+  hint?: string;
+};
+
+export type Assignment = {
+  id: number;
+  title: string;
+  description: string;
+  resources: AssignmentResource[];
+  submissionFields: SubmissionField[];
+  dueDays: number;
+  createdBy: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** An assignment a job sends to everyone who moves into a stage. */
+export type JobAssignment = {
+  id: number;
+  assignmentId: number;
+  triggerStageId: number;
+  createdAt: string;
+};
+
+export type AssignmentStatus = "pending" | "submitted" | "expired";
+
+/** An assignment sent to one candidate, and what they handed in. */
+export type CandidateAssignment = {
+  id: number;
+  assignmentId: number;
+  title: string;
+  status: AssignmentStatus;
+  dueAt: string;
+  submittedAt: string | null;
+  submissionFields: SubmissionField[];
+  submissionAnswers: Record<string, string>;
+  token: string;
+  createdAt: string;
+};

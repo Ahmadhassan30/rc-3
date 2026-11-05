@@ -1,0 +1,203 @@
+"use client";
+
+import { useState, useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import {
+  useTemplatesList,
+  useDeleteTemplate,
+  useCreateTemplate,
+  useBulkDeleteTemplates,
+} from "@/hooks/queries/use-templates";
+import type { Template } from "@/types";
+import { TemplatesHeader } from "./templates-header";
+import { TemplatesFilters } from "./templates-filters";
+import { TemplatesTable } from "./templates-table";
+import { TemplateTypePicker } from "./type-picker";
+import { TemplateDeleteDialog } from "./delete-dialog";
+import { DuplicateTemplateDialog } from "./duplicate-dialog";
+import { TemplatesTabs, type TemplatesTab } from "./templates-tabs";
+import { AutomaticEmailsList } from "./automatic-emails-list";
+
+const PAGE_LIMIT = 15;
+
+export default function TemplatesPageClient({ tab = "yours" }: { tab?: TemplatesTab }) {
+  const router = useRouter();
+
+  // ── Filter State ───────────────────────────────────────────
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filterType, setFilterType] = useState("all");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(1);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: templatesRes, isLoading } = useTemplatesList({
+    page,
+    limit: PAGE_LIMIT,
+    search: debouncedSearch || undefined,
+    type: filterType === "all" ? undefined : filterType,
+  });
+
+  const templates = templatesRes?.data ?? [];
+  const pagination = templatesRes?.pagination;
+
+  const createMutation = useCreateTemplate();
+  const deleteMutation = useDeleteTemplate();
+  const bulkDeleteMutation = useBulkDeleteTemplates();
+
+  // ── Type Picker (New Template) ───────────────────────────
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
+  const [pickedType, setPickedType] = useState<string | null>(null);
+
+  const handleOpenTypePicker = useCallback(() => {
+    // Default to email
+    setPickedType("email");
+    setTypePickerOpen(true);
+  }, []);
+
+  const handleContinue = useCallback(() => {
+    if (pickedType) {
+      setTypePickerOpen(false);
+      router.push(`/templates/new?type=${pickedType}`);
+    }
+  }, [pickedType, router]);
+
+  // Duplicate: ask for a name first
+  const [duplicateTarget, setDuplicateTarget] = useState<Template | null>(null);
+
+  const handleConfirmDuplicate = useCallback(
+    (name: string) => {
+      if (!duplicateTarget) return;
+      createMutation.mutate(
+        {
+          name,
+          type: duplicateTarget.type,
+          subject: duplicateTarget.subject,
+          bodyJson: duplicateTarget.bodyJson,
+        },
+        {
+          onSuccess: (res) => {
+            setDuplicateTarget(null);
+            toast.success(`Created "${name}"`, {
+              action: {
+                label: "Open",
+                onClick: () => router.push(`/templates/${res.data.id}/edit`),
+              },
+            });
+          },
+          onError: (error) =>
+            toast.error(error.message || "Failed to duplicate the template"),
+        },
+      );
+    },
+    [duplicateTarget, createMutation, router],
+  );
+
+  // ── Bulk Delete ────────────────────────────────────────────
+  const handleDeleteSelected = useCallback(
+    async (ids: number[]) => {
+      if (ids.length === 0) return false;
+      try {
+        await bulkDeleteMutation.mutateAsync(ids);
+        toast.success(`Deleted ${ids.length} ${ids.length === 1 ? "template" : "templates"}`);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to delete the templates");
+        return false;
+      }
+    },
+    [bulkDeleteMutation],
+  );
+
+  // ── Single Delete ──────────────────────────────────────────
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const deleteTarget = templates.find((t) => t.id === deleteId) ?? null;
+
+  const handleConfirmDelete = useCallback(() => {
+    if (deleteId === null) return;
+    deleteMutation.mutate(deleteId, {
+      onSuccess: () => {
+        toast.success("Template deleted");
+        setDeleteId(null);
+      },
+      onError: (error) => toast.error(error.message || "Failed to delete the template"),
+    });
+  }, [deleteId, deleteMutation]);
+
+  const handleSearchChange = useCallback((v: string) => { setSearch(v); }, []);
+  const handleTypeChange = useCallback((v: string) => { setFilterType(v); setPage(1); }, []);
+
+  const handleClearFilters = useCallback(() => {
+    setSearch("");
+    setFilterType("all");
+    setPage(1);
+  }, []);
+
+  return (
+    <div className="flex flex-1 flex-col min-h-0 bg-white dark:bg-neutral-950">
+      <TemplatesHeader onNewTemplate={handleOpenTypePicker} />
+      <TemplatesTabs tab={tab} />
+
+      {tab === "automatic" ? (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <AutomaticEmailsList />
+        </div>
+      ) : (
+        <>
+          <div className="flex-shrink-0">
+            <TemplatesFilters
+              search={search}
+              onSearchChange={handleSearchChange}
+              filterType={filterType}
+              onFilterTypeChange={handleTypeChange}
+              onClear={handleClearFilters}
+            />
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <TemplatesTable
+              templates={templates}
+              isLoading={isLoading}
+              onRowClick={(template) => router.push(`/templates/${template.id}/edit`)}
+              onDuplicate={setDuplicateTarget}
+              onDelete={setDeleteId}
+              onDeleteSelected={handleDeleteSelected}
+              isDeletingSelected={bulkDeleteMutation.isPending}
+              pagination={pagination}
+              onPageChange={setPage}
+            />
+          </div>
+        </>
+      )}
+
+      <TemplateTypePicker
+        isOpen={typePickerOpen}
+        pickedType={pickedType}
+        onPickType={setPickedType}
+        onClose={() => setTypePickerOpen(false)}
+        onContinue={handleContinue}
+      />
+
+      <DuplicateTemplateDialog
+        template={duplicateTarget}
+        isPending={createMutation.isPending}
+        onClose={() => setDuplicateTarget(null)}
+        onConfirm={handleConfirmDuplicate}
+      />
+
+      <TemplateDeleteDialog
+        template={deleteTarget}
+        isOpen={deleteId !== null}
+        isPending={deleteMutation.isPending}
+        onClose={() => setDeleteId(null)}
+        onConfirm={handleConfirmDelete}
+      />
+    </div>
+  );
+}

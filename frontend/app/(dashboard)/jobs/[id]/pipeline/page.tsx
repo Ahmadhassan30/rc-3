@@ -1,0 +1,298 @@
+"use client";
+
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useDragLayer } from "react-dnd";
+import { Button } from "@/components/ui/button";
+import type { BoardCandidate } from "@/types";
+import { useJob } from "@/hooks/queries/use-jobs";
+import { RoleGuard } from "@/components/guards/role-guard";
+import { usePipeline } from "@/hooks/queries/use-pipeline";
+import { useJobAssessments } from "@/hooks/queries/use-assessments";
+import { useBoardCandidates } from "@/hooks/queries/use-candidates";
+import { BoardColumn } from "./_components/board-column";
+import { BoardFiltersBar } from "./_components/board-filters-bar";
+import { BulkActionBar } from "./_components/bulk-action-bar";
+import { BoardHeader } from "./_components/board-header";
+import { DragPreview } from "./_components/drag-preview";
+import { MoveConfirmDialog } from "./_components/move-confirm-dialog";
+import { useBoardMoves } from "./_hooks/use-board-moves";
+import { useEdgeScroll } from "./_hooks/use-edge-scroll";
+import {
+  EMPTY_FILTERS,
+  hasCandidateFilters,
+  matchesFilters,
+  type BoardFilters,
+} from "./_lib/board-filters";
+import { bulkMoveTargets, groupByStage, isFullyVisibleX, toFullIndex } from "./_lib/board-utils";
+
+/** Update every minute so "5m ago" stays right */
+function useMinuteClock() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+// Interviewers do not get the board
+export default function HiringPipelinePage() {
+  const jobId = Number(useParams().id);
+  return (
+    <RoleGuard allow="manager" redirectTo={`/jobs/${jobId}`}>
+      <HiringPipeline />
+    </RoleGuard>
+  );
+}
+
+function HiringPipeline() {
+  const jobId = Number(useParams().id);
+  const router = useRouter();
+
+  const { data: jobData, isLoading: isLoadingJob } = useJob(jobId);
+
+  const { data: pipelineData, isLoading: isLoadingStages } = usePipeline(jobId);
+  const board = useBoardCandidates(jobId);
+  const { data: assessmentData } = useJobAssessments(jobId);
+
+  const job = jobData?.data;
+
+  useEffect(() => {
+    if (!isLoadingJob && !job) router.replace("/jobs");
+  }, [isLoadingJob, job, router]);
+
+  const stages = useMemo(
+    () => [...(pipelineData?.data ?? [])].sort((a, b) => a.position - b.position),
+    [pipelineData],
+  );
+  const assessmentStageIds = useMemo(
+    () =>
+      new Set(
+        (assessmentData?.data ?? [])
+          .map((a) => a.triggerStageId)
+          .filter((id): id is number => id !== null),
+      ),
+    [assessmentData],
+  );
+
+  const candidates = board.data?.data;
+  const byStage = useMemo(() => groupByStage(candidates ?? []), [candidates]);
+
+  const now = useMinuteClock();
+
+  // Use a deferred copy so typing stays fast
+  const [filters, setFilters] = useState<BoardFilters>(EMPTY_FILTERS);
+  const patchFilters = useCallback(
+    (patch: Partial<BoardFilters>) => setFilters((f) => ({ ...f, ...patch })),
+    [],
+  );
+  const clearFilters = useCallback(() => setFilters((f) => ({ ...EMPTY_FILTERS, search: f.search })), []);
+  const deferred = useDeferredValue(filters);
+  const isSearching = deferred.search.trim() !== "";
+  const isFiltering = hasCandidateFilters(deferred);
+
+  // Columns the stage filter leaves on the board.
+  const shownStages = useMemo(
+    () => (filters.stageIds.length === 0 ? stages : stages.filter((s) => filters.stageIds.includes(s.id))),
+    [stages, filters.stageIds],
+  );
+
+  const visibleByStage = useMemo(() => {
+    if (!isFiltering) return byStage;
+    const filtered = new Map<number, BoardCandidate[]>();
+    for (const [stageId, list] of byStage) {
+      filtered.set(stageId, list.filter((c) => matchesFilters(c, deferred, now)));
+    }
+    return filtered;
+  }, [byStage, deferred, isFiltering, now]);
+
+  // Only visible columns count
+  const shownCandidates = useMemo(
+    () => shownStages.flatMap((s) => visibleByStage.get(s.id) ?? []),
+    [shownStages, visibleByStage],
+  );
+  const matchCount = isFiltering ? shownCandidates.length : null;
+
+  // Ignore selected cards that are filtered out
+  const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
+  const selectedIds = useMemo(() => {
+    const shown = new Set(shownCandidates.map((c) => c.id));
+    return new Set([...selected].filter((id) => shown.has(id)));
+  }, [selected, shownCandidates]);
+  const selectionMode = selectedIds.size > 0;
+
+  const toggleSelect = useCallback((id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const toggleColumn = useCallback((ids: number[]) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const allOn = ids.every((id) => next.has(id));
+      for (const id of ids) {
+        if (allOn) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  }, []);
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  useEffect(() => {
+    if (!selectionMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") clearSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectionMode, clearSelection]);
+
+  const { movingIds, pending, requestMove, requestBulkMove, confirmPending, cancelPending } =
+    useBoardMoves(jobId, stages, assessmentStageIds, { onBulkMoved: clearSelection });
+
+  const bulkTargets = useMemo(
+    () => bulkMoveTargets(stages, shownCandidates.filter((c) => selectedIds.has(c.id))),
+    [stages, shownCandidates, selectedIds],
+  );
+
+  // Selected cards in board order
+  const moveSelected = useCallback(
+    (stageId: number) => {
+      requestBulkMove(
+        shownCandidates.filter((c) => selectedIds.has(c.id)).map((c) => c.id),
+        stageId,
+      );
+    },
+    [requestBulkMove, shownCandidates, selectedIds],
+  );
+
+  // Convert visible slot to column slot
+  const moveVisible = useCallback(
+    (candidateId: number, stageId: number, index: number) => {
+      const full = byStage.get(stageId) ?? [];
+      const visible = visibleByStage.get(stageId) ?? [];
+      requestMove(candidateId, stageId, toFullIndex(full, visible, index));
+    },
+    [byStage, visibleByStage, requestMove],
+  );
+
+  const openCandidate = useCallback(
+    (id: number) => router.push(`/candidates/${id}?from=pipeline`),
+    [router],
+  );
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to the first column with a match
+  const firstMatchStageId = isFiltering
+    ? (shownStages.find((s) => (visibleByStage.get(s.id)?.length ?? 0) > 0)?.id ?? null)
+    : null;
+  useEffect(() => {
+    if (firstMatchStageId === null) return;
+    const container = scrollRef.current;
+    const column = container?.querySelector<HTMLElement>(`[data-stage-id="${firstMatchStageId}"]`);
+    if (!container || !column) return;
+    const containerRect = container.getBoundingClientRect();
+    const columnRect = column.getBoundingClientRect();
+    if (isFullyVisibleX(columnRect, containerRect)) return;
+    container.scrollTo({
+      left: container.scrollLeft + (columnRect.left - containerRect.left) - 24,
+      behavior: "smooth",
+    });
+  }, [firstMatchStageId]);
+
+  // Scroll back to the first stage after clearing
+  const wasFiltering = useRef(false);
+  useEffect(() => {
+    if (wasFiltering.current && !isFiltering) {
+      scrollRef.current?.scrollTo({ left: 0, behavior: "smooth" });
+    }
+    wasFiltering.current = isFiltering;
+  }, [isFiltering]);
+
+  const { isDragging } = useDragLayer((monitor) => ({ isDragging: monitor.isDragging() }));
+  useEdgeScroll(scrollRef, isDragging);
+
+  const isLoading = board.isPending || isLoadingStages;
+
+  return (
+    <div className="relative flex h-[calc(100vh-var(--header-height))] w-full min-w-0 flex-col overflow-hidden bg-slate-50 dark:bg-neutral-950">
+      <DragPreview />
+      <BoardHeader
+        jobId={jobId}
+        job={job}
+        candidateCount={candidates ? candidates.length : null}
+        matchCount={matchCount}
+        search={filters.search}
+        onSearchChange={(search) => patchFilters({ search })}
+      />
+      <BoardFiltersBar
+        filters={filters}
+        stages={stages}
+        onChange={patchFilters}
+        onClear={clearFilters}
+      />
+
+      <div
+        ref={scrollRef}
+        className="min-h-0 w-full min-w-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:thin]"
+      >
+        {board.isError ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            <p className="text-[15px] font-semibold text-slate-900 dark:text-neutral-100">
+              The pipeline could not be loaded
+            </p>
+            <p className="text-sm text-slate-500 dark:text-neutral-400">
+              Check your connection and try again.
+            </p>
+            <Button variant="cancel" className="h-9 px-4 text-sm" onClick={() => board.refetch()}>
+              Try again
+            </Button>
+          </div>
+        ) : !isLoadingStages && stages.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-6">
+            <p className="text-sm text-slate-500 dark:text-neutral-400">
+              This job has no pipeline stages yet. Add some under Hiring Process.
+            </p>
+          </div>
+        ) : (
+          <div className="flex h-full w-max items-stretch gap-4 p-4 sm:p-6">
+            {(isLoadingStages ? [] : shownStages).map((stage) => (
+              <BoardColumn
+                key={stage.id}
+                stage={stage}
+                stages={stages}
+                candidates={visibleByStage.get(stage.id) ?? []}
+                totalCount={byStage.get(stage.id)?.length ?? 0}
+                now={now}
+                isLoading={isLoading}
+                movingIds={movingIds}
+                isSearching={isSearching}
+                selectedIds={selectedIds}
+                selectionMode={selectionMode}
+                onToggleSelect={toggleSelect}
+                onToggleColumn={toggleColumn}
+                onOpen={openCandidate}
+                onMove={moveVisible}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <BulkActionBar
+        count={selectedIds.size}
+        stages={bulkTargets}
+        onMove={moveSelected}
+        onClear={clearSelection}
+      />
+
+      <MoveConfirmDialog pending={pending} onClose={cancelPending} onConfirm={confirmPending} />
+    </div>
+  );
+}

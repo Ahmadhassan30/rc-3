@@ -1,0 +1,504 @@
+import { Request, Response } from "express";
+import { z } from "zod";
+import { offerService, OfferClosedError } from "./offer.service";
+import { socketService } from "../../shared/services/socket.service";
+import logger from "../../utils/logger";
+import { asEnum } from "../../utils/object.utils";
+import { offers } from "../../db/schema";
+import { notificationService } from "../../shared/services/notification.service";
+import { canViewCandidate, canViewJob, canViewOffers, teamScope } from "../../shared/auth/job-access";
+
+const bulkDeleteOffersSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1),
+});
+
+const offerStatusSchema = z.enum([
+  "draft",
+  "sent",
+  "viewed",
+  "accepted",
+  "declined",
+  "expired",
+]);
+
+// The moment the offer stops being open, with its time zone offset. Has to be still to come:
+// an offer cannot be given a date that has already passed.
+const expirySchema = z
+  .string()
+  .datetime({ offset: true })
+  .refine((value) => new Date(value).getTime() > Date.now(), "The expiry date must be in the future")
+  .optional()
+  .nullable();
+
+const offerInputSchema = z.object({
+  candidateId: z.number().int().positive(),
+  jobId: z.number().int().positive(),
+  templateId: z.number().int().positive().optional().nullable(),
+  salary: z.number().positive().optional().nullable(),
+  currency: z.string().trim().length(3).optional().nullable(),
+  employmentType: z
+    .enum(["full_time", "part_time", "contract", "internship", "freelance"])
+    .optional()
+    .nullable(),
+  startDate: z.string().date().optional().nullable(),
+  expiresAt: expirySchema,
+  reportingManager: z.string().trim().min(1).max(255).optional().nullable(),
+  benefits: z.string().trim().min(1).max(4000).optional().nullable(),
+  offerLetterHtml: z.string().optional().nullable(),
+  status: offerStatusSchema.optional(),
+});
+
+const offerUpdateSchema = z.object({
+  templateId: z.number().int().positive().optional().nullable(),
+  salary: z.number().positive().optional().nullable(),
+  currency: z.string().trim().length(3).optional().nullable(),
+  employmentType: z
+    .enum(["full_time", "part_time", "contract", "internship", "freelance"])
+    .optional()
+    .nullable(),
+  startDate: z.string().date().optional().nullable(),
+  expiresAt: expirySchema,
+  reportingManager: z.string().trim().min(1).max(255).optional().nullable(),
+  benefits: z.string().trim().min(1).max(4000).optional().nullable(),
+  offerLetterHtml: z.string().optional().nullable(),
+  status: offerStatusSchema.optional(),
+});
+
+/** Answers 409 when the offer is already decided or expired. Returns whether it did. */
+function answerClosed(res: Response, error: unknown): boolean {
+  if (!(error instanceof OfferClosedError)) return false;
+  res.status(409).json({ error: error.message, code: "OFFER_CLOSED" });
+  return true;
+}
+
+function paramStr(value: string | string[] | undefined) {
+  return (value ?? "").toString();
+}
+
+function parseId(value: string | string[] | undefined) {
+  const parsed = parseInt(paramStr(value), 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+export const getAllOffers = async (req: Request, res: Response) => {
+  try {
+    const { page, limit, search, status, jobId } = req.query;
+
+    if (page !== undefined) {
+      const result = await offerService.getPaginated({
+        page: parseInt(page as string) || 1,
+        limit: parseInt((limit as string) ?? "15") || 15,
+        search: (search as string) || undefined,
+        status: asEnum(status, offers.status.enumValues),
+        jobId: jobId ? parseInt(jobId as string) : undefined,
+        teamUserId: teamScope(req.user),
+      });
+      res.status(200).json({
+        data: result.rows,
+        pagination: { total: result.total, page: result.page, limit: result.limit, totalPages: result.totalPages },
+      });
+      return;
+    }
+
+    const result = await offerService.getAllDetails(teamScope(req.user));
+    res.status(200).json({ data: result });
+  } catch (error) {
+    logger.error(`Failed to fetch all offers: ${(error as Error)?.message}`);
+    res.status(500).json({ error: "Failed to fetch all offers" });
+  }
+};
+
+export const deleteOffer = async (req: Request, res: Response) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid offer ID" });
+      return;
+    }
+    logger.warn(`Offer deletion requested: id=${id} by user ${req.user?.id}`);
+    const deleted = await offerService.deleteById(id);
+    if (!deleted) {
+      res.status(404).json({ error: "Offer not found" });
+      return;
+    }
+    socketService.notifyOfferChanged({
+      offerId: deleted.id,
+      candidateId: deleted.candidateId,
+      jobId: deleted.jobId,
+    });
+    res.status(200).json({ data: deleted });
+  } catch (error) {
+    logger.error(`Failed to delete offer ${req.params.id}: ${(error as Error)?.message}`);
+    res.status(500).json({ error: "Failed to delete offer" });
+  }
+};
+
+export const bulkDeleteOffers = async (req: Request, res: Response) => {
+  try {
+    const parsed = bulkDeleteOffersSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten().fieldErrors });
+      return;
+    }
+    logger.warn(`Bulk offer deletion requested: ids=${parsed.data.ids.join(",")} by user ${req.user?.id}`);
+    if (!(await canViewOffers(req.user, parsed.data.ids))) {
+      res.status(403).json({ error: "You do not have access to some of these offers" });
+      return;
+    }
+    const deleted = await offerService.deleteMany(parsed.data.ids);
+    for (const offer of deleted) {
+      socketService.notifyOfferChanged({
+        offerId: offer.id,
+        candidateId: offer.candidateId,
+        jobId: offer.jobId,
+      });
+    }
+    res.status(200).json({ data: deleted, count: deleted.length });
+  } catch (error) {
+    logger.error(`Failed to bulk delete offers - user ${req.user?.id}: ${(error as Error)?.message}`);
+    res.status(500).json({ error: "Failed to delete offers" });
+  }
+};
+
+export const getAllOffersByJob = async (req: Request, res: Response) => {
+  try {
+    const jobId = parseId(req.params.jobId);
+    if (!jobId) {
+      res.status(400).json({ error: "Invalid job ID" });
+      return;
+    }
+
+    const result = await offerService.getAllByJob(jobId);
+    res.status(200).json({ data: result });
+  } catch (error) {
+    logger.error(
+      `Failed to fetch offers for job ${req.params.jobId}: ${(error as Error)?.message}`,
+    );
+    res.status(500).json({ error: "Failed to fetch offers" });
+  }
+};
+
+export const getOfferById = async (req: Request, res: Response) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid offer ID" });
+      return;
+    }
+
+    const result = await offerService.getById(id);
+    if (!result) {
+      res.status(404).json({ error: "Offer not found" });
+      return;
+    }
+
+    res.status(200).json({ data: result });
+  } catch (error) {
+    logger.error(`Failed to fetch offer ${req.params.id}: ${(error as Error)?.message}`);
+    res.status(500).json({ error: "Failed to fetch offer" });
+  }
+};
+
+export const createOffer = async (req: Request, res: Response) => {
+  try {
+    const parsed = offerInputSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Validation failed",
+        details: parsed.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    if (!(await canViewCandidate(req.user, parsed.data.candidateId)) || !(await canViewJob(req.user, parsed.data.jobId))) {
+      res.status(403).json({ error: "You do not have access to this candidate" });
+      return;
+    }
+
+    const created = await offerService.create({
+      ...parsed.data,
+      createdBy: req.user.id,
+    });
+
+    socketService.notifyOfferChanged({
+      offerId: created.id,
+      candidateId: created.candidateId,
+      jobId: created.jobId,
+    });
+
+    res.status(201).json({ data: created });
+  } catch (error) {
+    logger.error(`Failed to create offer: ${(error as Error)?.message}`);
+    res.status(400).json({ error: (error as Error).message || "Failed to create offer" });
+  }
+};
+
+export const updateOffer = async (req: Request, res: Response) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid offer ID" });
+      return;
+    }
+
+    const parsed = offerUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Validation failed",
+        details: parsed.error.flatten().fieldErrors,
+      });
+      return;
+    }
+
+    const updated = await offerService.update(id, parsed.data, req.user.id);
+    if (!updated) {
+      res.status(404).json({ error: "Offer not found" });
+      return;
+    }
+
+    socketService.notifyOfferChanged({
+      offerId: updated.id,
+      candidateId: updated.candidateId,
+      jobId: updated.jobId,
+    });
+
+    res.status(200).json({ data: updated });
+  } catch (error) {
+    if (answerClosed(res, error)) return;
+    logger.error(`Failed to update offer ${req.params.id}: ${(error as Error)?.message}`);
+    res.status(400).json({ error: (error as Error).message || "Failed to update offer" });
+  }
+};
+
+export const sendOffer = async (req: Request, res: Response) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid offer ID" });
+      return;
+    }
+
+    const sent = await offerService.send(id, req.user.id);
+    if (!sent) {
+      res.status(404).json({ error: "Offer not found" });
+      return;
+    }
+
+    socketService.notifyOfferChanged({
+      offerId: sent.id,
+      candidateId: sent.candidateId,
+      jobId: sent.jobId,
+    });
+
+    res.status(200).json({ data: sent });
+  } catch (error) {
+    logger.error(`Failed to send offer ${req.params.id}: ${(error as Error)?.message}`);
+    res.status(400).json({ error: (error as Error).message || "Failed to send offer" });
+  }
+};
+
+export const acceptOffer = async (req: Request, res: Response) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid offer ID" });
+      return;
+    }
+
+    const accepted = await offerService.acceptById(id, req.user.id);
+    if (!accepted) {
+      res.status(404).json({ error: "Offer not found" });
+      return;
+    }
+
+    socketService.notifyOfferChanged({
+      offerId: accepted.id,
+      candidateId: accepted.candidateId,
+      jobId: accepted.jobId,
+    });
+
+    res.status(200).json({ data: accepted });
+  } catch (error) {
+    if (answerClosed(res, error)) return;
+    logger.error(`Failed to accept offer ${req.params.id}: ${(error as Error)?.message}`);
+    res.status(400).json({ error: (error as Error).message || "Failed to accept offer" });
+  }
+};
+
+export const declineOffer = async (req: Request, res: Response) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid offer ID" });
+      return;
+    }
+
+    const declined = await offerService.declineById(id, req.user.id);
+    if (!declined) {
+      res.status(404).json({ error: "Offer not found" });
+      return;
+    }
+
+    socketService.notifyOfferChanged({
+      offerId: declined.id,
+      candidateId: declined.candidateId,
+      jobId: declined.jobId,
+    });
+
+    res.status(200).json({ data: declined });
+  } catch (error) {
+    if (answerClosed(res, error)) return;
+    logger.error(`Failed to decline offer ${req.params.id}: ${(error as Error)?.message}`);
+    res.status(400).json({ error: (error as Error).message || "Failed to decline offer" });
+  }
+};
+
+export const markCandidateHired = async (req: Request, res: Response) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid offer ID" });
+      return;
+    }
+
+    const result = await offerService.markAsHired(id, req.user.id);
+    if (!result) {
+      res.status(404).json({ error: "Offer not found" });
+      return;
+    }
+
+    socketService.notifyOfferChanged({
+      offerId: id,
+      candidateId: result.candidate.id,
+      jobId: result.candidate.jobId,
+    });
+    socketService.notifyStageChanged({
+      candidateId: result.candidate.id,
+      jobId: result.candidate.jobId,
+      stageId: result.hiredStage.id,
+    });
+
+    res.status(200).json({ data: result });
+  } catch (error) {
+    logger.error(`Failed to mark offer ${req.params.id} as hired: ${(error as Error)?.message}`);
+    res.status(400).json({ error: (error as Error).message || "Failed to mark as hired" });
+  }
+};
+
+export const getPublicOfferByToken = async (req: Request, res: Response) => {
+  try {
+    const token = paramStr(req.params.token).trim();
+    if (!token) {
+      res.status(400).json({ error: "Invalid token" });
+      return;
+    }
+
+    const result = await offerService.getPublicByToken(token);
+    if (!result) {
+      res.status(404).json({ error: "Offer link is invalid" });
+      return;
+    }
+
+    res.status(200).json({ data: result });
+  } catch (error) {
+    logger.error(`Failed to get public offer by token: ${(error as Error)?.message}`);
+    res.status(500).json({ error: "Failed to fetch offer" });
+  }
+};
+
+export const acceptPublicOffer = async (req: Request, res: Response) => {
+  try {
+    const token = paramStr(req.params.token).trim();
+    if (!token) {
+      res.status(400).json({ error: "Invalid token" });
+      return;
+    }
+
+    const result = await offerService.acceptByToken(token);
+    if (!result) {
+      res.status(404).json({ error: "Offer link is invalid" });
+      return;
+    }
+    void notificationService.notifyJobTeam({
+      type: "offer_accepted",
+      jobId: result.jobId,
+      candidateId: result.candidateId,
+    });
+
+    socketService.notifyOfferChanged({
+      offerId: result.id,
+      candidateId: result.candidateId,
+      jobId: result.jobId,
+    });
+
+    // The candidate's page only needs the new status, not the stored offer.
+    res.status(200).json({ data: { status: result.status } });
+  } catch (error) {
+    if (answerClosed(res, error)) return;
+    logger.error(`Failed to accept public offer: ${(error as Error)?.message}`);
+    res.status(400).json({ error: (error as Error).message || "Failed to accept offer" });
+  }
+};
+
+export const declinePublicOffer = async (req: Request, res: Response) => {
+  try {
+    const token = paramStr(req.params.token).trim();
+    if (!token) {
+      res.status(400).json({ error: "Invalid token" });
+      return;
+    }
+
+    const result = await offerService.declineByToken(token);
+    if (!result) {
+      res.status(404).json({ error: "Offer link is invalid" });
+      return;
+    }
+    void notificationService.notifyJobTeam({
+      type: "offer_declined",
+      jobId: result.jobId,
+      candidateId: result.candidateId,
+    });
+
+    socketService.notifyOfferChanged({
+      offerId: result.id,
+      candidateId: result.candidateId,
+      jobId: result.jobId,
+    });
+
+    res.status(200).json({ data: { status: result.status } });
+  } catch (error) {
+    if (answerClosed(res, error)) return;
+    logger.error(`Failed to decline public offer: ${(error as Error)?.message}`);
+    res.status(400).json({ error: (error as Error).message || "Failed to decline offer" });
+  }
+};
+
+/** Called by the offer page once it is on screen, so "viewed" means a person looked at it. */
+export const markPublicOfferViewed = async (req: Request, res: Response) => {
+  try {
+    const token = paramStr(req.params.token).trim();
+    if (!token) {
+      res.status(400).json({ error: "Invalid token" });
+      return;
+    }
+
+    const offer = await offerService.markViewedByToken(token);
+    if (!offer) {
+      res.status(404).json({ error: "Offer link is invalid" });
+      return;
+    }
+
+    if (offer.status === "viewed") {
+      socketService.notifyOfferChanged({
+        offerId: offer.id,
+        candidateId: offer.candidateId,
+        jobId: offer.jobId,
+      });
+    }
+
+    res.status(200).json({ data: { status: offer.status } });
+  } catch (error) {
+    logger.error(`Failed to mark public offer viewed: ${(error as Error)?.message}`);
+    res.status(500).json({ error: "Failed to update offer" });
+  }
+};

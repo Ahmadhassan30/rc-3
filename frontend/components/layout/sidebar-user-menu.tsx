@@ -1,0 +1,188 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Logout01Icon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
+
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useSidebar } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
+import { authClient } from "@/lib/auth/client";
+import { useRouter } from "next/navigation";
+import { useCurrentUser } from "@/hooks/queries/use-user";
+import { initialsOf } from "@/lib/initials";
+import { ThemeSwitch } from "@/components/theme/theme-switch";
+
+export type SidebarUserMenuProps = {
+  variant?: "header" | "sidebar";
+};
+
+export function SidebarUserMenu({
+  variant = "header",
+}: SidebarUserMenuProps) {
+  const router = useRouter();
+  const { state } = useSidebar();
+  const queryClient = useQueryClient();
+  const [confirmLogoutOpen, setConfirmLogoutOpen] = React.useState(false);
+
+  const collapsed = state === "collapsed";
+  const showProfileRow = variant === "sidebar" && !collapsed;
+
+  const { data: currentUser, isLoading } = useCurrentUser();
+  const me = currentUser?.data;
+
+  const displayName =
+    [me?.firstName, me?.lastName].filter(Boolean).join(" ") ||
+    me?.email ||
+    "User";
+  const email = me?.email ?? "";
+  const avatarSrc = me?.avatarUrl ?? undefined;
+  const initials = initialsOf(me?.firstName, me?.lastName, displayName);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label="Account menu"
+        className={cn(
+          "inline-flex max-w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg text-left outline-none transition-colors",
+          variant === "header"
+            ? "rounded-full p-0.5 hover:bg-slate-100/90 dark:hover:bg-neutral-800 focus-visible:ring-2 focus-visible:ring-slate-400/40 dark:focus-visible:ring-neutral-600 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            : "px-1.5 py-1.5 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        )}
+      >
+        <Avatar
+          className={cn(
+            "size-9 shrink-0 border",
+            variant === "header"
+              ? "border-slate-200 dark:border-neutral-700"
+              : "border-sidebar-border",
+          )}
+        >
+          {avatarSrc ? <AvatarImage src={avatarSrc} alt="" /> : null}
+          <AvatarFallback
+            className={cn(
+              "text-xs font-semibold",
+              variant === "header"
+                ? "bg-slate-200 text-slate-700 dark:bg-neutral-700 dark:text-neutral-100"
+                : "bg-sidebar-accent text-sidebar-accent-foreground",
+            )}
+          >
+            {initials}
+          </AvatarFallback>
+        </Avatar>
+        {showProfileRow && (
+          <>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-sidebar-foreground">
+                {isLoading ? "…" : displayName}
+              </p>
+            </div>
+            <HugeiconsIcon
+              icon={MoreHorizontalIcon}
+              className="size-4 shrink-0 text-sidebar-foreground/70"
+              strokeWidth={2}
+            />
+          </>
+        )}
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        className="w-72 rounded-xl border border-border bg-popover p-0 shadow-lg"
+        side="bottom"
+        align="end"
+        sideOffset={8}
+      >
+        <Link
+          href="/settings/profile"
+          className="block cursor-pointer border-b border-border px-3 py-3 transition-colors hover:bg-accent/40"
+        >
+          <div className="flex items-center gap-3">
+            <Avatar className="size-8 shrink-0 border border-border">
+              {avatarSrc ? <AvatarImage src={avatarSrc} alt="" /> : null}
+              <AvatarFallback className="text-xs font-semibold bg-slate-200 text-slate-700 dark:bg-neutral-700 dark:text-neutral-100">
+                {initials}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[15px] font-semibold leading-snug text-popover-foreground">
+                {isLoading ? "Loading…" : displayName}
+              </p>
+              {email ? (
+                <p className="mt-0.5 truncate text-xs font-normal leading-5 text-muted-foreground">
+                  {email}
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </Link>
+
+        <div
+          className="flex min-h-10 items-center justify-between gap-2 border-b border-border px-3 py-2.5"
+          onPointerDown={(e) => e.preventDefault()}
+        >
+          <span className="text-sm text-popover-foreground">Theme</span>
+          <ThemeSwitch />
+        </div>
+
+        <div className="p-1">
+          <DropdownMenuItem
+            variant="destructive"
+            className="min-h-10 cursor-pointer justify-between gap-3 rounded-md px-2 py-2"
+            onClick={() => setConfirmLogoutOpen(true)}
+          >
+            <span>Log out</span>
+            <HugeiconsIcon
+              icon={Logout01Icon}
+              className="size-4 opacity-80"
+              strokeWidth={2}
+            />
+          </DropdownMenuItem>
+        </div>
+      </DropdownMenuContent>
+
+      <AlertDialog open={confirmLogoutOpen} onOpenChange={setConfirmLogoutOpen}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Log out?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You will be signed out of your current session.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                void authClient.signOut().finally(() => {
+                  queryClient.clear();
+                  router.push("/login");
+                  router.refresh();
+                });
+              }}
+            >
+              Log out
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </DropdownMenu>
+  );
+}

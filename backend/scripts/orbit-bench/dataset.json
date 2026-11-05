@@ -1,0 +1,191 @@
+{
+  "version": "orbit-tech-retrieval-v1",
+  "frozenAt": "2026-11-05T00:00:00.000Z",
+  "description": "Synthetic technical-resume passages. Relevance labels were authored before model inference. Labels represent retrieval relevance, not proof of proficiency.",
+  "passages": [
+    {
+      "id": "amina-experience-django",
+      "candidateId": "amina",
+      "section": "experience",
+      "text": "For three years I developed Python services with Django and Django REST Framework, including versioned HTTP endpoints used by partner systems.",
+      "evidenceStateHint": "SUPPORTED"
+    },
+    {
+      "id": "amina-project-postgres",
+      "candidateId": "amina",
+      "section": "project",
+      "text": "Designed the PostgreSQL schema and optimized queries for a warehouse inventory backend project.",
+      "evidenceStateHint": "SUPPORTED"
+    },
+    {
+      "id": "amina-deployment-docker",
+      "candidateId": "amina",
+      "section": "experience",
+      "text": "Wrote Dockerfiles and Docker Compose services, then operated the containerized application in production.",
+      "evidenceStateHint": "SUPPORTED"
+    },
+    {
+      "id": "amina-skills",
+      "candidateId": "amina",
+      "section": "skills",
+      "text": "Skills: Python, Django, PostgreSQL, Docker, JavaScript.",
+      "evidenceStateHint": "MENTIONED_ONLY"
+    },
+    {
+      "id": "bilal-experience-fastapi",
+      "candidateId": "bilal",
+      "section": "experience",
+      "text": "Built production Python microservices with FastAPI and maintained an older Flask service; I have not used Django professionally.",
+      "evidenceStateHint": "RELATED_ONLY"
+    },
+    {
+      "id": "bilal-database-mysql",
+      "candidateId": "bilal",
+      "section": "experience",
+      "text": "Administered MySQL databases and tuned indexes for high-volume order processing.",
+      "evidenceStateHint": "RELATED_ONLY"
+    },
+    {
+      "id": "bilal-deployment-no-docker",
+      "candidateId": "bilal",
+      "section": "experience",
+      "text": "Deployed services to virtual machines using systemd. No Docker experience.",
+      "evidenceStateHint": "NOT_FOUND"
+    },
+    {
+      "id": "bilal-project-rest",
+      "candidateId": "bilal",
+      "section": "project",
+      "text": "Created a FastAPI inventory project exposing JSON resources over stateless HTTP endpoints for mobile clients.",
+      "evidenceStateHint": "SUPPORTED"
+    },
+    {
+      "id": "bilal-education",
+      "candidateId": "bilal",
+      "section": "education",
+      "text": "Completed a professional certificate in cloud operations.",
+      "evidenceStateHint": "SUPPORTED"
+    },
+    {
+      "id": "chen-experience-javascript",
+      "candidateId": "chen",
+      "section": "experience",
+      "text": "Implemented Node.js services in JS and JavaScript, publishing resource-oriented HTTP endpoints consumed by web applications.",
+      "evidenceStateHint": "SUPPORTED"
+    },
+    {
+      "id": "chen-database-postgres",
+      "candidateId": "chen",
+      "section": "experience",
+      "text": "Operated PostgreSQL for a reporting platform, including backup validation and query analysis.",
+      "evidenceStateHint": "SUPPORTED"
+    },
+    {
+      "id": "chen-skills-docker",
+      "candidateId": "chen",
+      "section": "skills",
+      "text": "Tools and skills: Git, Docker, Linux, TypeScript.",
+      "evidenceStateHint": "MENTIONED_ONLY"
+    },
+    {
+      "id": "chen-project-design",
+      "candidateId": "chen",
+      "section": "project",
+      "text": "Produced a visual design portfolio containing brand illustrations and print layouts.",
+      "evidenceStateHint": "NOT_FOUND"
+    },
+    {
+      "id": "chen-education-ambiguous",
+      "candidateId": "chen",
+      "section": "education",
+      "text": "Coursework toward a BSc in Computer Science; completion status was not stated.",
+      "evidenceStateHint": "UNCERTAIN"
+    },
+    {
+      "id": "daria-education-degree",
+      "candidateId": "daria",
+      "section": "education",
+      "text": "Bachelor of Science in Computer Science, awarded by Northbridge University in 2022.",
+      "evidenceStateHint": "SUPPORTED"
+    },
+    {
+      "id": "daria-experience-support",
+      "candidateId": "daria",
+      "section": "experience",
+      "text": "Provided desktop support, managed ticket queues, and prepared end-user training materials.",
+      "evidenceStateHint": "NOT_FOUND"
+    },
+    {
+      "id": "daria-project-forecast",
+      "candidateId": "daria",
+      "section": "project",
+      "text": "Built a Python forecasting notebook for a university statistics course; it was not a web backend.",
+      "evidenceStateHint": "RELATED_ONLY"
+    }
+  ],
+  "queries": [
+    {
+      "id": "django-professional",
+      "text": "professional Django backend development experience",
+      "relevantPassageIds": ["amina-experience-django"],
+      "hardNegativePassageIds": ["bilal-experience-fastapi", "amina-skills"],
+      "rationale": "Django must be supported by experience; related Python frameworks, negation, and a skills-list mention are not sufficient."
+    },
+    {
+      "id": "python-backend",
+      "text": "experience building backend services with Python",
+      "relevantPassageIds": ["amina-experience-django", "bilal-experience-fastapi"],
+      "hardNegativePassageIds": ["daria-project-forecast"],
+      "rationale": "Both Django and FastAPI work are valid Python backend evidence; a non-web notebook is related but not relevant."
+    },
+    {
+      "id": "postgresql",
+      "text": "hands-on PostgreSQL database experience",
+      "relevantPassageIds": ["amina-project-postgres", "chen-database-postgres"],
+      "hardNegativePassageIds": ["bilal-database-mysql"],
+      "rationale": "MySQL is related database work but not PostgreSQL evidence."
+    },
+    {
+      "id": "docker-deployment",
+      "text": "used Docker to containerize and deploy production services",
+      "relevantPassageIds": ["amina-deployment-docker"],
+      "hardNegativePassageIds": ["bilal-deployment-no-docker", "chen-skills-docker"],
+      "rationale": "Explicit deployment is relevant; negation and skills-list-only mention are not experience evidence."
+    },
+    {
+      "id": "docker-any-mention",
+      "text": "Docker knowledge or experience",
+      "relevantPassageIds": ["amina-deployment-docker", "amina-skills", "chen-skills-docker"],
+      "hardNegativePassageIds": ["bilal-deployment-no-docker"],
+      "rationale": "For broad discovery, skills-list mentions are relevant, while explicit negation is not."
+    },
+    {
+      "id": "rest-paraphrase",
+      "text": "developed REST APIs for other applications to consume",
+      "relevantPassageIds": ["amina-experience-django", "bilal-project-rest", "chen-experience-javascript"],
+      "hardNegativePassageIds": ["chen-project-design"],
+      "rationale": "Versioned HTTP endpoints, stateless JSON resources, and resource-oriented endpoints are REST paraphrases."
+    },
+    {
+      "id": "javascript-experience",
+      "text": "professional JavaScript or JS backend experience",
+      "relevantPassageIds": ["chen-experience-javascript"],
+      "hardNegativePassageIds": ["amina-skills"],
+      "rationale": "JS and JavaScript are aliases, but a skills list alone is not professional experience."
+    },
+    {
+      "id": "relevant-backend-project",
+      "text": "completed a relevant backend software project",
+      "relevantPassageIds": ["amina-project-postgres", "bilal-project-rest"],
+      "hardNegativePassageIds": ["chen-project-design", "daria-project-forecast"],
+      "rationale": "Inventory backend work is relevant; visual design and a non-web notebook are not."
+    },
+    {
+      "id": "completed-cs-degree",
+      "text": "completed bachelor's degree in computer science",
+      "relevantPassageIds": ["daria-education-degree"],
+      "hardNegativePassageIds": ["chen-education-ambiguous", "bilal-education"],
+      "rationale": "An awarded degree is relevant; incomplete or ambiguous coursework and an unrelated certificate are not."
+    }
+  ]
+}

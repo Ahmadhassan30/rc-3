@@ -1,0 +1,262 @@
+import { eq, and, inArray } from "drizzle-orm";
+import { db } from "../../db";
+import {
+  jobCustomQuestions,
+  jobCustomQuestionOptions,
+  jobAssessmentAttachments,
+  jobPipelineStages,
+} from "../../db/schema";
+import { cleanObject as clean } from "../../utils/object.utils";
+import { mustAnswer } from "../candidate/application-answers";
+
+export interface OptionInput {
+  /** Set when editing an existing option, so candidates' picks of it are kept. */
+  id?: number | undefined;
+  label: string;
+  isCorrect?: boolean | undefined;
+  points?: number | undefined;
+  isKnockout?: boolean | undefined;
+  position: number;
+}
+
+export interface CreateCustomQuestionInput {
+  title: string;
+  questionType: "short_answer" | "long_answer" | "url" | "checkbox" | "radio";
+  isRequired?: boolean | undefined;
+  position: number;
+  options?: OptionInput[] | undefined;
+}
+
+export interface UpdateCustomQuestionInput {
+  title?: string | undefined;
+  questionType?: ("short_answer" | "long_answer" | "url" | "checkbox" | "radio") | undefined;
+  isRequired?: boolean | undefined;
+  position?: number | undefined;
+  options?: OptionInput[] | undefined;
+}
+
+export interface AttachAssessmentInput {
+  assessmentId: number;
+  triggerStageId: number;
+  passMark?: number | undefined;
+}
+
+
+
+export const customQuestionService = {
+  /**
+   * What an applicant is shown: the options only, never the points or knockout flags. A question
+   * that has to be answered because of a knockout option is shown as required, like any other,
+   * so the form asks for it and nothing tells the applicant why.
+   */
+  async getForApplicant(jobId: number) {
+    const questions = await customQuestionService.getByJobId(jobId);
+    return questions.map((q) => ({
+      ...q,
+      isRequired: mustAnswer(q),
+      options: q.options.map(({ points: _p, isKnockout: _k, isCorrect: _c, ...o }) => o),
+    }));
+  },
+
+  async getByJobId(jobId: number) {
+    const questions = await db
+      .select()
+      .from(jobCustomQuestions)
+      .where(eq(jobCustomQuestions.jobId, jobId))
+      .orderBy(jobCustomQuestions.position);
+
+    return Promise.all(
+      questions.map(async (q) => {
+        const options = await db
+          .select()
+          .from(jobCustomQuestionOptions)
+          .where(eq(jobCustomQuestionOptions.questionId, q.id))
+          .orderBy(jobCustomQuestionOptions.position);
+        return { ...q, options };
+      }),
+    );
+  },
+
+  async create(jobId: number, input: CreateCustomQuestionInput) {
+    const { options, ...questionData } = input;
+
+    return await db.transaction(async (tx) => {
+      const [question] = await tx
+        .insert(jobCustomQuestions)
+        .values(clean({ ...questionData, jobId }))
+        .returning();
+
+      if (!question) {
+        throw new Error("Failed to create custom question");
+      }
+
+      if (options && options.length > 0) {
+        await tx.insert(jobCustomQuestionOptions).values(
+          options.map((o) => ({
+            questionId: question.id,
+            label: o.label,
+            isCorrect: o.isCorrect ?? false,
+            points: o.points ?? 0,
+            isKnockout: o.isKnockout ?? false,
+            position: o.position,
+          })),
+        );
+      }
+
+      const savedOptions = await tx
+        .select()
+        .from(jobCustomQuestionOptions)
+        .where(eq(jobCustomQuestionOptions.questionId, question.id));
+
+      return { ...question, options: savedOptions };
+    });
+  },
+
+  async update(
+    jobId: number,
+    questionId: number,
+    input: UpdateCustomQuestionInput,
+  ) {
+    const { options, ...questionData } = input;
+
+    return await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(jobCustomQuestions)
+        .set({ ...clean(questionData), updatedAt: new Date() })
+        .where(
+          and(
+            eq(jobCustomQuestions.id, questionId),
+            eq(jobCustomQuestions.jobId, jobId),
+          ),
+        )
+        .returning();
+
+      if (!updated) return null;
+
+      if (options !== undefined) {
+        // Edit options in place rather than recreating them: deleting an option also deletes the
+        // candidates' recorded picks of it, and with them their score.
+        const existing = await tx
+          .select({ id: jobCustomQuestionOptions.id })
+          .from(jobCustomQuestionOptions)
+          .where(eq(jobCustomQuestionOptions.questionId, questionId));
+        const existingIds = new Set(existing.map((o) => o.id));
+        const kept = new Set<number>();
+
+        for (const o of options) {
+          const values = {
+            label: o.label,
+            isCorrect: o.isCorrect ?? false,
+            points: o.points ?? 0,
+            isKnockout: o.isKnockout ?? false,
+            position: o.position,
+          };
+          // An id that is not one of this question's options is treated as a new option.
+          if (o.id !== undefined && existingIds.has(o.id) && !kept.has(o.id)) {
+            kept.add(o.id);
+            await tx
+              .update(jobCustomQuestionOptions)
+              .set(values)
+              .where(eq(jobCustomQuestionOptions.id, o.id));
+          } else {
+            const [inserted] = await tx
+              .insert(jobCustomQuestionOptions)
+              .values({ questionId, ...values })
+              .returning({ id: jobCustomQuestionOptions.id });
+            if (inserted) kept.add(inserted.id);
+          }
+        }
+
+        const removed = [...existingIds].filter((id) => !kept.has(id));
+        if (removed.length > 0) {
+          await tx
+            .delete(jobCustomQuestionOptions)
+            .where(inArray(jobCustomQuestionOptions.id, removed));
+        }
+      }
+
+      const savedOptions = await tx
+        .select()
+        .from(jobCustomQuestionOptions)
+        .where(eq(jobCustomQuestionOptions.questionId, questionId));
+
+      return { ...updated, options: savedOptions };
+    });
+  },
+
+  async delete(jobId: number, questionId: number) {
+    const [deleted] = await db
+      .delete(jobCustomQuestions)
+      .where(
+        and(
+          eq(jobCustomQuestions.id, questionId),
+          eq(jobCustomQuestions.jobId, jobId),
+        ),
+      )
+      .returning();
+    return deleted ?? null;
+  },
+
+  async getAttachment(jobId: number) {
+    const [attachment] = await db
+      .select()
+      .from(jobAssessmentAttachments)
+      .where(eq(jobAssessmentAttachments.jobId, jobId));
+    return attachment ?? null;
+  },
+
+  async attachAssessment(jobId: number, input: AttachAssessmentInput) {
+    const [stage] = await db
+      .select()
+      .from(jobPipelineStages)
+      .where(
+        and(
+          eq(jobPipelineStages.id, input.triggerStageId),
+          eq(jobPipelineStages.jobId, jobId),
+        ),
+      );
+
+    if (!stage) {
+      throw new Error("Stage not found or does not belong to this job");
+    }
+
+    const [attachment] = await db
+      .insert(jobAssessmentAttachments)
+      .values(clean({
+        jobId,
+        assessmentId: input.assessmentId,
+        triggerStageId: input.triggerStageId,
+        passMark: input.passMark,
+      }))
+      .onConflictDoUpdate({
+        target: [
+          jobAssessmentAttachments.jobId,
+          jobAssessmentAttachments.triggerStageId,
+        ],
+        set: {
+          assessmentId: input.assessmentId,
+          ...(input.passMark !== undefined && { passMark: input.passMark }),
+        },
+      })
+      .returning();
+
+    if (!attachment) {
+      throw new Error("Failed to attach assessment");
+    }
+
+    return attachment;
+  },
+
+  async detachAssessment(jobId: number, triggerStageId: number) {
+    const [deleted] = await db
+      .delete(jobAssessmentAttachments)
+      .where(
+        and(
+          eq(jobAssessmentAttachments.jobId, jobId),
+          eq(jobAssessmentAttachments.triggerStageId, triggerStageId),
+        ),
+      )
+      .returning();
+    return deleted ?? null;
+  },
+};

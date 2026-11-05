@@ -1,0 +1,433 @@
+import { eq, desc, ilike, inArray, and, sql } from "drizzle-orm";
+import { db, NewJob } from "../../db";
+import { cleanObject as clean } from "../../utils/object.utils";
+import { requestResumeDeletion } from "../../queues/resume-delete/queue";
+import { sanitizeJobDescription } from "./job-description";
+import {
+  jobs,
+  jobSkills,
+  pipelineStageTemplates,
+  jobPipelineStages,
+  jobHiringTeam,
+  jobAssessmentAttachments,
+  offers,
+  candidates,
+  departments,
+} from "../../db/schema";
+
+export type JobListFilters = {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: (typeof jobs.status.enumValues)[number];
+  departmentId?: number;
+  userId?: number;
+};
+
+export type CreateJobInput = {
+  title: string;
+  departmentId: number;
+  employmentType:
+    | "full_time"
+    | "part_time"
+    | "contract"
+    | "internship"
+    | "freelance";
+  location?: string | null;
+  description?: string | null;
+  skills?: string[];
+  salaryType?: "range" | "fixed" | null;
+  currency?: string | null;
+  payFrequency?: "hourly" | "daily" | "weekly" | "monthly" | "yearly" | null;
+  salaryFixed?: number | null;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  status?: "draft" | "inactive" | "published" | "closed" | "archived";
+  scoreWeightQuestions?: number;
+  scoreWeightAssessment?: number;
+  scoreWeightRating?: number;
+  scoreWeightInterview?: number;
+  createdBy: number;
+};
+
+export type UpdateJobInput = {
+  title?: string;
+  departmentId?: number;
+  employmentType?:
+    | "full_time"
+    | "part_time"
+    | "contract"
+    | "internship"
+    | "freelance";
+  location?: string | null;
+  description?: string | null;
+  skills?: string[];
+  salaryType?: "range" | "fixed" | null;
+  currency?: string | null;
+  payFrequency?: "hourly" | "daily" | "weekly" | "monthly" | "yearly" | null;
+  salaryFixed?: number | null;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
+  status?: "draft" | "inactive" | "published" | "closed" | "archived";
+  scoreWeightQuestions?: number;
+  scoreWeightAssessment?: number;
+  scoreWeightRating?: number;
+  scoreWeightInterview?: number;
+};
+
+function generateSlug(title: string): string {
+  return (
+    title
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-") +
+    "-" +
+    Date.now()
+  );
+}
+
+export const jobService = {
+  /** Published jobs for the public careers index (no auth). */
+  async listPublishedForCareers() {
+    const rows = await db
+      .select({
+        id: jobs.id,
+        slug: jobs.slug,
+        title: jobs.title,
+        employmentType: jobs.employmentType,
+        location: jobs.location,
+        departmentName: departments.name,
+        createdAt: jobs.createdAt,
+      })
+      .from(jobs)
+      .innerJoin(departments, eq(jobs.departmentId, departments.id))
+      .where(eq(jobs.status, "published"))
+      .orderBy(desc(jobs.createdAt));
+
+    return rows;
+  },
+
+  async getAll(userId?: number) {
+    const teamFilter = userId
+      ? inArray(jobs.id, db.select({ id: jobHiringTeam.jobId }).from(jobHiringTeam).where(eq(jobHiringTeam.userId, userId)))
+      : undefined;
+    const allJobs = await db.select().from(jobs).where(teamFilter).orderBy(desc(jobs.createdAt));
+
+    const skillsByJobId = new Map<number, string[]>();
+    if (allJobs.length > 0) {
+      const allSkills = await db
+        .select()
+        .from(jobSkills)
+        .where(inArray(jobSkills.jobId, allJobs.map((j) => j.id)));
+      allSkills.forEach((s) => {
+        if (!skillsByJobId.has(s.jobId)) skillsByJobId.set(s.jobId, []);
+        skillsByJobId.get(s.jobId)!.push(s.skill);
+      });
+    }
+
+    return allJobs.map((job) => ({
+      ...job,
+      skills: skillsByJobId.get(job.id) ?? [],
+    }));
+  },
+
+  async getPaginated(filters: JobListFilters = {}) {
+    const { page = 1, limit = 15, search, status, departmentId, userId } = filters;
+    const offset = (page - 1) * limit;
+
+    const conditions = [];
+    if (search) conditions.push(ilike(jobs.title, `%${search}%`));
+    if (status) conditions.push(eq(jobs.status, status));
+    if (departmentId) conditions.push(eq(jobs.departmentId, departmentId));
+    if (userId) conditions.push(
+      inArray(jobs.id, db.select({ id: jobHiringTeam.jobId }).from(jobHiringTeam).where(eq(jobHiringTeam.userId, userId)))
+    );
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [rows, [countRow]] = await Promise.all([
+      db.select().from(jobs).where(where).orderBy(desc(jobs.createdAt)).limit(limit).offset(offset),
+      db.select({ count: sql<number>`count(*)::int` }).from(jobs).where(where),
+    ]);
+
+    const skillsByJobId = new Map<number, string[]>();
+    if (rows.length > 0) {
+      const allSkills = await db
+        .select()
+        .from(jobSkills)
+        .where(inArray(jobSkills.jobId, rows.map((j) => j.id)));
+      allSkills.forEach((s) => {
+        if (!skillsByJobId.has(s.jobId)) skillsByJobId.set(s.jobId, []);
+        skillsByJobId.get(s.jobId)!.push(s.skill);
+      });
+    }
+
+    const total = countRow?.count ?? 0;
+    return {
+      rows: rows.map((j) => ({ ...j, skills: skillsByJobId.get(j.id) ?? [] })),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  },
+
+  async deleteMany(ids: number[]) {
+    if (ids.length === 0) return [];
+    let resumeKeys: Array<string | null> = [];
+    const deleted = await db.transaction(async (tx) => {
+      await tx.delete(offers).where(inArray(offers.jobId, ids));
+      const removed = await tx
+        .delete(candidates)
+        .where(inArray(candidates.jobId, ids))
+        .returning({ resumeKey: candidates.resumeKey });
+      resumeKeys = removed.map((candidate) => candidate.resumeKey);
+      return tx.delete(jobs).where(inArray(jobs.id, ids)).returning();
+    });
+
+    // Deleting a job deletes its candidates, so their CV files go too. After the commit, so a
+    // rolled-back delete erases nothing.
+    await requestResumeDeletion(resumeKeys);
+    return deleted;
+  },
+
+  async getById(id: number) {
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, id));
+    if (!job) return null;
+
+    const skills = await db
+      .select()
+      .from(jobSkills)
+      .where(eq(jobSkills.jobId, id));
+
+    const team = await db
+      .select()
+      .from(jobHiringTeam)
+      .where(eq(jobHiringTeam.jobId, id));
+
+    const stages = await db
+      .select()
+      .from(jobPipelineStages)
+      .where(eq(jobPipelineStages.jobId, id))
+      .orderBy(jobPipelineStages.position);
+
+    return {
+      ...job,
+      skills: skills.map((s) => s.skill),
+      hiringTeam: team,
+      pipelineStages: stages,
+    };
+  },
+
+  /** A job is publicly accessible only after it has been published. */
+  async getPublishedById(id: number) {
+    const job = await this.getById(id);
+    return job?.status === "published" ? job : null;
+  },
+
+  async getBySlug(slug: string) {
+    const [job] = await db.select().from(jobs).where(eq(jobs.slug, slug));
+    if (!job) return null;
+
+    const skills = await db
+      .select()
+      .from(jobSkills)
+      .where(eq(jobSkills.jobId, job.id));
+
+    return {
+      ...job,
+      skills: skills.map((s) => s.skill),
+    };
+  },
+
+  async create(input: CreateJobInput) {
+    const slug = generateSlug(input.title);
+    const { skills, ...jobData } = input;
+
+    return await db.transaction(async (tx) => {
+      const newJob: NewJob = {
+        title: jobData.title,
+        slug,
+        departmentId: jobData.departmentId,
+        employmentType: jobData.employmentType,
+        location: jobData.location ?? null,
+        // Cleaned here, in the one place a description is written, whatever sent it.
+        description: sanitizeJobDescription(jobData.description) ?? null,
+        salaryType: jobData.salaryType ?? null,
+        currency: jobData.currency ?? null,
+        payFrequency: jobData.payFrequency ?? null,
+        salaryFixed: jobData.salaryFixed ?? null,
+        salaryMin: jobData.salaryMin ?? null,
+        salaryMax: jobData.salaryMax ?? null,
+        status: jobData.status ?? "draft",
+        ...clean({
+          scoreWeightQuestions: jobData.scoreWeightQuestions,
+          scoreWeightAssessment: jobData.scoreWeightAssessment,
+          scoreWeightRating: jobData.scoreWeightRating,
+          scoreWeightInterview: jobData.scoreWeightInterview,
+        }),
+        createdBy: jobData.createdBy,
+      };
+
+      const [job] = await tx.insert(jobs).values(newJob).returning();
+
+      if (!job) {
+        throw new Error("Failed to create job");
+      }
+
+      if (skills && skills.length > 0) {
+        await tx
+          .insert(jobSkills)
+          .values(skills.map((skill) => ({ jobId: job.id, skill })));
+      }
+
+      const templates = await tx
+        .select()
+        .from(pipelineStageTemplates)
+        .orderBy(pipelineStageTemplates.position);
+
+      if (templates.length > 0) {
+        await tx.insert(jobPipelineStages).values(
+          templates.map((t) => ({
+            jobId: job.id,
+            name: t.name,
+            position: t.position,
+            stageType: t.stageType,
+            sourceTemplateId: t.id,
+          })),
+        );
+      }
+
+      await tx.insert(jobHiringTeam).values({
+        jobId: job.id,
+        userId: input.createdBy,
+      });
+
+      return job;
+    });
+  },
+
+  async update(id: number, input: UpdateJobInput) {
+    const { skills, ...jobData } = input;
+
+    return await db.transaction(async (tx) => {
+      const updateData: Partial<typeof jobs.$inferInsert> = {
+        ...jobData,
+        updatedAt: new Date(),
+      };
+      if (jobData.description !== undefined)
+        updateData.description = sanitizeJobDescription(jobData.description);
+      if (jobData.salaryFixed !== undefined)
+        updateData.salaryFixed = jobData.salaryFixed || null;
+      if (jobData.salaryMin !== undefined)
+        updateData.salaryMin = jobData.salaryMin || null;
+      if (jobData.salaryMax !== undefined)
+        updateData.salaryMax = jobData.salaryMax || null;
+
+      const [updated] = await tx
+        .update(jobs)
+        .set(updateData)
+        .where(eq(jobs.id, id))
+        .returning();
+
+      if (!updated) return null;
+
+      if (skills !== undefined) {
+        await tx.delete(jobSkills).where(eq(jobSkills.jobId, id));
+        if (skills.length > 0) {
+          await tx
+            .insert(jobSkills)
+            .values(skills.map((skill) => ({ jobId: id, skill })));
+        }
+      }
+
+      return updated;
+    });
+  },
+
+  /** What deleting these jobs takes with it, to say so before anyone confirms. */
+  async getDeleteSummary(ids: number[]) {
+    const [[candidateRow], [offerRow]] = await Promise.all([
+      db.select({ count: sql<number>`count(*)::int` }).from(candidates).where(inArray(candidates.jobId, ids)),
+      db.select({ count: sql<number>`count(*)::int` }).from(offers).where(inArray(offers.jobId, ids)),
+    ]);
+    return { candidates: candidateRow?.count ?? 0, offers: offerRow?.count ?? 0 };
+  },
+
+  async delete(id: number) {
+    let resumeKeys: Array<string | null> = [];
+    const deletedJob = await db.transaction(async (tx) => {
+      await tx.delete(offers).where(eq(offers.jobId, id));
+      const removed = await tx
+        .delete(candidates)
+        .where(eq(candidates.jobId, id))
+        .returning({ resumeKey: candidates.resumeKey });
+      resumeKeys = removed.map((candidate) => candidate.resumeKey);
+
+      const [deleted] = await tx
+        .delete(jobs)
+        .where(eq(jobs.id, id))
+        .returning();
+
+      return deleted ?? null;
+    });
+
+    // The candidates' CV files, as in deleteMany.
+    await requestResumeDeletion(resumeKeys);
+    return deletedJob;
+  },
+
+  async getAssessments(jobId: number) {
+    return db
+      .select({
+        id: jobAssessmentAttachments.id,
+        assessmentId: jobAssessmentAttachments.assessmentId,
+        triggerStageId: jobAssessmentAttachments.triggerStageId,
+        passMark: jobAssessmentAttachments.passMark,
+        createdAt: jobAssessmentAttachments.createdAt,
+      })
+      .from(jobAssessmentAttachments)
+      .where(eq(jobAssessmentAttachments.jobId, jobId));
+  },
+
+  async attachAssessment(input: {
+    jobId: number;
+    assessmentId: number;
+    triggerStageId: number;
+    passMark?: number;
+  }) {
+    const [attached] = await db
+      .insert(jobAssessmentAttachments)
+      .values({
+        jobId: input.jobId,
+        assessmentId: input.assessmentId,
+        triggerStageId: input.triggerStageId,
+        ...(input.passMark !== undefined && { passMark: input.passMark }),
+      })
+      .returning();
+    return attached;
+  },
+
+  async updateAttachmentPassMark(jobId: number, attachmentId: number, passMark: number) {
+    const [updated] = await db
+      .update(jobAssessmentAttachments)
+      .set({ passMark })
+      .where(
+        and(
+          eq(jobAssessmentAttachments.id, attachmentId),
+          eq(jobAssessmentAttachments.jobId, jobId),
+        ),
+      )
+      .returning();
+    return updated ?? null;
+  },
+
+  async detachAssessment(attachmentId: number) {
+    const [detached] = await db
+      .delete(jobAssessmentAttachments)
+      .where(eq(jobAssessmentAttachments.id, attachmentId))
+      .returning();
+    return detached;
+  },
+};

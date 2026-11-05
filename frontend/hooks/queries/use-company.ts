@@ -1,0 +1,92 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { clientFetch } from "@/lib/client-fetch";
+import type { Company, Department } from "@/types";
+
+export function useUploadLogo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/upload/logo", { method: "POST", body: formData });
+      const json = await res.json().catch(() => null) as { data: { url: string } } | { error?: string } | null;
+      if (!res.ok) throw new Error((json as { error?: string } | null)?.error ?? "Upload failed");
+      return (json as { data: { url: string } }).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company"] });
+    },
+  });
+}
+
+export function useCompany() {
+  return useQuery({
+    queryKey: ["company"],
+    queryFn: () => clientFetch<{ data: Company | null }>("/company"),
+    staleTime: 1000 * 60 * 10,
+  });
+}
+
+export function useUpsertCompany() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Partial<Company>) =>
+      clientFetch<{ data: Company }>("/company", {
+        method: "PUT",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company"] });
+    },
+  });
+}
+
+export function useDepartments(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["departments"],
+    queryFn: () => clientFetch<{ data: Department[] }>("/company/departments"),
+    staleTime: 1000 * 60 * 10,
+    enabled: options?.enabled ?? true,
+  });
+}
+
+export function useCreateDepartment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string }) =>
+      clientFetch<{ data: Department }>("/company/departments", {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["departments"] });
+    },
+  });
+}
+
+export function useUpdateDepartment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      clientFetch<{ data: Department }>(`/company/departments/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["departments"] });
+    },
+  });
+}
+
+export function useDeleteDepartment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) =>
+      clientFetch<{ data: Department }>(`/company/departments/${id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["departments"] });
+    },
+  });
+}
