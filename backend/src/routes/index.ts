@@ -17,6 +17,7 @@ import rejectionRoutes from "../modules/rejection/rejections.routes";
 import candidateEmailRoutes from "../modules/candidate-email/candidate-email.routes";
 import integrationRoutes from "../modules/integrations/integrations.routes";
 import notificationRoutes from "../modules/notification/notification.routes";
+import orbitRoutes from "../modules/orbit/orbit.routes";
 
 const router: Router = Router();
 
@@ -38,5 +39,6 @@ router.use("/", rejectionRoutes);
 router.use("/", candidateEmailRoutes);
 router.use("/integrations", integrationRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/orbit", orbitRoutes);
 
 export default router;

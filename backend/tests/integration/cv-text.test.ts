@@ -111,6 +111,7 @@ describe("stored CV text", () => {
   });
 
   it("drops a result for a CV that has since been replaced", async () => {
+    await db.update(candidates).set({ resumeKey: NEW_KEY }).where(eq(candidates.id, candidateId));
     await cvTextService.markPending(candidateId, NEW_KEY);
     expect(await matches("nurse")).toBe(false);
 
@@ -130,6 +131,7 @@ describe("stored CV text", () => {
   });
 
   it("works the details out again from the stored text, without the file", async () => {
+    await db.update(candidates).set({ resumeKey: OLD_KEY }).where(eq(candidates.id, candidateId));
     await cvTextService.markPending(candidateId, OLD_KEY);
     await cvTextService.save(candidateId, OLD_KEY, await extractCvText(cvFile()));
     await db

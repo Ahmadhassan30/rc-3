@@ -4,6 +4,8 @@ import { extractPdfText } from "./extract-pdf";
 import { normalizeForSearch } from "./normalize-search";
 import { buildCvProfile, type CvProfile } from "./profile";
 import { hasUsableText } from "./quality";
+import { createHash } from "node:crypto";
+import { buildEvidence, type ExtractedEvidence } from "../../orbit/evidence";
 
 /**
  * Raise this when a change to how a file is read would give different text for the same file, then
@@ -11,7 +13,7 @@ import { hasUsableText } from "./quality";
  * worked out from the text (sections, years, education, search terms) does not need it: run the
  * backfill with `--reparse` instead.
  */
-export const EXTRACTOR_VERSION = 1;
+export const EXTRACTOR_VERSION = 2;
 
 /** A file that will fail the same way every time, so there is no point in trying it again. */
 export class UnreadableCvError extends Error {}
@@ -26,6 +28,7 @@ export interface ExtractedCv {
   pageCount: number;
   /** Null when there is no text to read it from. */
   profile: CvProfile | null;
+  evidence: ExtractedEvidence | null;
 }
 
 /** Reads the text of a CV. Nothing leaves the server. */
@@ -37,7 +40,7 @@ export async function extractCvText(file: Buffer): Promise<ExtractedCv> {
     );
   }
 
-  let extracted: { text: string; pageCount: number };
+  let extracted: { text: string; pageCount: number; pages: string[] };
   try {
     extracted = await extractPdfText(file);
   } catch (error) {
@@ -50,7 +53,7 @@ export async function extractCvText(file: Buffer): Promise<ExtractedCv> {
 
   const text = cleanCvText(extracted.text);
   if (!hasUsableText(text, extracted.pageCount)) {
-    return { status: "empty", fileType, method: "text", text: "", searchText: "", pageCount: extracted.pageCount, profile: null };
+    return { status: "empty", fileType, method: "text", text: "", searchText: "", pageCount: extracted.pageCount, profile: null, evidence: null };
   }
 
   return {
@@ -61,5 +64,6 @@ export async function extractCvText(file: Buffer): Promise<ExtractedCv> {
     searchText: normalizeForSearch(text),
     pageCount: extracted.pageCount,
     profile: buildCvProfile(text),
+    evidence: buildEvidence(extracted.pages, createHash("sha256").update(file).digest("hex"), EXTRACTOR_VERSION),
   };
 }

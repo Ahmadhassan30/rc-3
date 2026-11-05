@@ -1,12 +1,13 @@
 import { getDocumentProxy } from "unpdf";
 import { pageToText, type TextItem } from "./layout";
+import { MAX_CV_CHARS } from "./clean";
 
 /** Pages read from one CV. Longer files are almost never CVs, and each page costs time. */
 export const MAX_CV_PAGES = 30;
 
 export async function extractPdfText(
   file: Buffer,
-): Promise<{ text: string; pageCount: number }> {
+): Promise<{ text: string; pageCount: number; pages: string[] }> {
   // PDF.js takes ownership of the bytes it is given, so it gets its own copy.
   const pdf = await getDocumentProxy(new Uint8Array(file));
 
@@ -32,11 +33,14 @@ export async function extractPdfText(
         });
       }
 
-      pages.push(pageToText(items, width));
+      // Canonical source text: only normalize line endings and characters Postgres cannot store.
+      // Search/readable text is cleaned separately and must never be used for evidence offsets.
+      const remaining = Math.max(0, MAX_CV_CHARS - pages.reduce((sum, text) => sum + text.length, 0));
+      pages.push(pageToText(items, width).replace(/\r\n?/g, "\n").replace(/\0/g, "").slice(0, remaining));
       page.cleanup();
     }
 
-    return { text: pages.join("\n\n"), pageCount };
+    return { text: pages.join("\n\n"), pageCount, pages };
   } finally {
     await pdf.loadingTask.destroy();
   }

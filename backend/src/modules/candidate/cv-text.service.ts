@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
-import { candidateCvText, db } from "../../db";
+import { candidateCvText, candidates, db, orbitCandidateEvidence } from "../../db";
 import { EXTRACTOR_VERSION, type ExtractedCv } from "./cv-text";
 import { normalizeForSearch } from "./cv-text/normalize-search";
 import { buildCvProfile } from "./cv-text/profile";
@@ -68,10 +68,17 @@ export const cvTextService = {
       errorMessage: null,
       updatedAt: new Date(),
     };
-    await db
-      .insert(candidateCvText)
-      .values({ candidateId, ...reset })
-      .onConflictDoUpdate({ target: candidateCvText.candidateId, set: reset });
+    await db.transaction(async (tx) => {
+      const [candidate] = await tx.select({ resumeKey: candidates.resumeKey }).from(candidates)
+        .where(eq(candidates.id, candidateId)).for("update");
+      if (candidate?.resumeKey !== resumeKey) return;
+      const [existing] = await tx.select({ resumeKey: candidateCvText.resumeKey, status: candidateCvText.status, extractorVersion: candidateCvText.extractorVersion })
+        .from(candidateCvText).where(eq(candidateCvText.candidateId, candidateId));
+      if (existing?.resumeKey === resumeKey && existing.status === "done" && existing.extractorVersion === EXTRACTOR_VERSION) return;
+      await tx.insert(candidateCvText).values({ candidateId, ...reset })
+        .onConflictDoUpdate({ target: candidateCvText.candidateId, set: reset });
+      await tx.delete(orbitCandidateEvidence).where(eq(orbitCandidateEvidence.candidateId, candidateId));
+    });
   },
 
   /**
@@ -79,9 +86,12 @@ export const cvTextService = {
    * was being read, the row now names the new file and this result is dropped.
    */
   async save(candidateId: number, resumeKey: string, cv: ExtractedCv): Promise<void> {
-    await db
-      .update(candidateCvText)
-      .set({
+    await db.transaction(async (tx) => {
+      // Lock the candidate first, serializing against resume replacement and markPending.
+      const [candidate] = await tx.select({ resumeKey: candidates.resumeKey }).from(candidates)
+        .where(eq(candidates.id, candidateId)).for("update");
+      if (candidate?.resumeKey !== resumeKey) return;
+      const saved = await tx.update(candidateCvText).set({
         status: cv.status,
         method: cv.method,
         fileType: cv.fileType,
@@ -97,9 +107,26 @@ export const cvTextService = {
         errorMessage: null,
         updatedAt: new Date(),
       })
-      .where(
-        and(eq(candidateCvText.candidateId, candidateId), eq(candidateCvText.resumeKey, resumeKey)),
-      );
+      .where(and(eq(candidateCvText.candidateId, candidateId), eq(candidateCvText.resumeKey, resumeKey)))
+      .returning({ candidateId: candidateCvText.candidateId });
+      if (!saved.length) return;
+      if (cv.evidence && cv.status === "done") {
+        const [previous] = await tx.select({ sourceHash: orbitCandidateEvidence.sourceHash, extractorVersion: orbitCandidateEvidence.extractorVersion })
+          .from(orbitCandidateEvidence).where(eq(orbitCandidateEvidence.candidateId, candidateId));
+        if (previous && (previous.sourceHash !== cv.evidence.sourceHash || previous.extractorVersion !== cv.evidence.extractorVersion)) {
+          await tx.delete(orbitCandidateEvidence).where(eq(orbitCandidateEvidence.candidateId, candidateId));
+        }
+        const values = {
+          candidateId, resumeKey, sourceHash: cv.evidence.sourceHash,
+          extractorVersion: cv.evidence.extractorVersion, pages: cv.evidence.pages,
+          passages: cv.evidence.passages, facts: cv.evidence.facts, updatedAt: new Date(),
+        };
+        await tx.insert(orbitCandidateEvidence).values(values)
+          .onConflictDoUpdate({ target: orbitCandidateEvidence.candidateId, set: values });
+      } else {
+        await tx.delete(orbitCandidateEvidence).where(eq(orbitCandidateEvidence.candidateId, candidateId));
+      }
+    });
   },
 
   async markFailed(candidateId: number, resumeKey: string, message: string): Promise<void> {
@@ -107,7 +134,7 @@ export const cvTextService = {
       .update(candidateCvText)
       .set({ status: "failed", errorMessage: message, updatedAt: new Date() })
       .where(
-        and(eq(candidateCvText.candidateId, candidateId), eq(candidateCvText.resumeKey, resumeKey)),
+        and(eq(candidateCvText.candidateId, candidateId), eq(candidateCvText.resumeKey, resumeKey), eq(candidateCvText.status, "pending")),
       );
   },
 
