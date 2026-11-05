@@ -67,3 +67,27 @@ export const orbitPassageEmbeddings = pgTable("orbit_passage_embeddings", {
   unique("uq_orbit_passage_embedding_version").on(t.candidateId, t.passageId, t.embeddingVersion),
   index("idx_orbit_passage_embeddings_candidate").on(t.candidateId),
 ]);
+
+export const orbitCandidateAssessments = pgTable("orbit_candidate_assessments", {
+  id: serial("id").primaryKey(),
+  candidateId: integer("candidate_id").notNull().references(() => candidates.id, { onDelete: "cascade" }),
+  jobId: integer("job_id").notNull().references(() => jobs.id, { onDelete: "cascade" }),
+  resumeKey: varchar("resume_key", { length: 1000 }).notNull(),
+  sourceHash: varchar("source_hash", { length: 64 }).notNull(),
+  requirementsVersion: integer("requirements_version").notNull(),
+  scoringVersion: varchar("scoring_version", { length: 32 }).notNull(),
+  status: varchar("status", { length: 16 }).notNull().default("pending"),
+  overallScore: integer("overall_score"),
+  components: jsonb("components").$type<Record<string, number | null>>().notNull().default({}),
+  effectiveWeights: jsonb("effective_weights").$type<Record<string, number>>().notNull().default({}),
+  requirements: jsonb("assessment_requirements").$type<unknown[]>().notNull().default([]),
+  missingOrUncertain: jsonb("missing_or_uncertain").$type<string[]>().notNull().default([]),
+  processingError: text("processing_error"),
+  embeddingModel: varchar("embedding_model", { length: 200 }),
+  embeddingVersion: varchar("embedding_version", { length: 32 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  unique("uq_orbit_assessment_generation").on(t.candidateId, t.jobId, t.resumeKey, t.requirementsVersion, t.scoringVersion),
+  index("idx_orbit_assessments_job_score").on(t.jobId, t.overallScore),
+]);

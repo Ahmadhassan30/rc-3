@@ -31,10 +31,11 @@ import { company, departments } from "../../src/db/schema/company";
 import { jobs } from "../../src/db/schema/jobs";
 import { jobPipelineStages } from "../../src/db/schema/pipeline";
 import { candidates } from "../../src/db/schema/candidates";
-import { orbitCandidateEvidence, orbitEvidenceOverrides, orbitPassageEmbeddings } from "../../src/db/schema/orbit";
+import { orbitCandidateAssessments, orbitCandidateEvidence, orbitEvidenceOverrides, orbitPassageEmbeddings } from "../../src/db/schema/orbit";
 import { users } from "../../src/db/schema/users";
 import { startCvExtractWorker } from "../../src/queues/cv-extract/worker";
 import { startOrbitEmbeddingWorker } from "../../src/queues/orbit-embedding/worker";
+import { startOrbitAssessmentWorker } from "../../src/queues/orbit-assessment/worker";
 import { cvExtractQueue } from "../../src/queues/cv-extract/queue";
 import { cvTextService } from "../../src/modules/candidate/cv-text.service";
 import { extractCvText } from "../../src/modules/candidate/cv-text";
@@ -67,6 +68,7 @@ const pdf = buildPdf([
 let storageDir: string;
 let worker: ReturnType<typeof startCvExtractWorker>;
 let embeddingWorker: ReturnType<typeof startOrbitEmbeddingWorker>;
+let assessmentWorker: ReturnType<typeof startOrbitAssessmentWorker>;
 let companyId: number, departmentId: number, jobId: number, candidateId: number;
 let adminId: number, outsiderId: number;
 let adminAuth: string, outsiderAuth: string;
@@ -95,13 +97,16 @@ beforeAll(async () => {
   await db.insert(jobPipelineStages).values({ jobId, name: "Applied", position: 0 });
   worker = startCvExtractWorker();
   embeddingWorker = startOrbitEmbeddingWorker();
+  assessmentWorker = startOrbitAssessmentWorker();
   await worker.waitUntilReady();
   await embeddingWorker.waitUntilReady();
+  await assessmentWorker.waitUntilReady();
 }, 30_000);
 
 afterAll(async () => {
   await worker?.close();
     await embeddingWorker?.close();
+    await assessmentWorker?.close();
   if (candidateId) await db.delete(candidates).where(eq(candidates.id, candidateId));
   await db.delete(jobs).where(eq(jobs.id, jobId));
   await db.delete(users).where(eq(users.id, outsiderId));
@@ -130,10 +135,20 @@ async function waitForEvidence() {
 async function waitForEmbeddings() {
   for (let attempt = 0; attempt < 120; attempt++) {
     const rows = await db.select().from(orbitPassageEmbeddings).where(eq(orbitPassageEmbeddings.candidateId, candidateId));
-    if (rows.length > 0) return rows;
+    const [snapshot] = await db.select({ embeddingStatus: orbitCandidateEvidence.embeddingStatus }).from(orbitCandidateEvidence).where(eq(orbitCandidateEvidence.candidateId, candidateId));
+    if (rows.length > 0 && snapshot?.embeddingStatus === "completed") return rows;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error("The real BGE worker did not persist passage embeddings within 30 seconds");
+}
+
+async function waitForAssessment() {
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const [assessment] = await db.select().from(orbitCandidateAssessments).where(eq(orbitCandidateAssessments.candidateId, candidateId));
+    if (assessment?.status === "completed") return assessment;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("The real assessment worker did not persist a completed score within 30 seconds");
 }
 
 describe("Orbit real PDF integration", () => {
@@ -228,12 +243,19 @@ describe("Orbit real PDF integration", () => {
     expect((await request(app).post(`/api/orbit/jobs/${jobId}/requirements/${version}/approve`).set("Authorization", outsiderAuth)).status).toBe(403);
     const approved = await request(app).post(`/api/orbit/jobs/${jobId}/requirements/${version}/approve`).set("Authorization", adminAuth);
     expect(approved.status).toBe(200);
+    const assessment = await waitForAssessment();
+    expect(assessment.overallScore).toBeGreaterThanOrEqual(0);
+    expect(assessment.overallScore).toBeLessThanOrEqual(100);
+    expect(assessment.components).toHaveProperty("skills");
+    const ranking = await request(app).get(`/api/orbit/jobs/${jobId}/ranking`).set("Authorization", adminAuth);
+    expect(ranking.status).toBe(200);
+    expect(ranking.body.data.some((item: { candidateId: number }) => item.candidateId === candidateId)).toBe(true);
     expect(approved.body.data.status).toBe("approved");
     const retrieved = await request(app).get(`/api/orbit/jobs/${jobId}/requirements`).set("Authorization", adminAuth);
     expect(retrieved.status).toBe(200);
     expect(retrieved.body.data.requirements.requiredSkills[0].skill).toBe("PostgreSQL");
     expect(retrieved.body.data.descriptionChanged).toBe(false);
-  });
+  }, 30_000);
 
   it("cascades private evidence and overrides when the candidate is erased", async () => {
     await db.delete(candidates).where(eq(candidates.id, candidateId));

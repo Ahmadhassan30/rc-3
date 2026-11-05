@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useUpdateInterview } from "@/hooks/queries/use-interviews";
 import type { InterviewListItem } from "@/types";
+import { createJitsiMeetingUrl } from "@/lib/jitsi";
 
 interface EditDialogProps {
   open: boolean;
@@ -75,6 +76,16 @@ export function EditDialog({
               placeholder="e.g. Technical Interview"
               className="h-8 rounded-md border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-none text-sm focus-visible:ring-1 focus-visible:ring-[var(--theme-color)] focus-visible:border-[var(--theme-color)]"
             />
+            {target?.eventType !== "onsite" && !meetingUrl && (
+              <Button
+                type="button"
+                variant="cancel"
+                onClick={() => onMeetingUrlChange(createJitsiMeetingUrl(`orbit-${crypto.randomUUID().replaceAll("-", "")}`))}
+                className="mt-2 h-8 text-xs"
+              >
+                Generate Orbit video room
+              </Button>
+            )}
           </div>
           <div>
             <Label className="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-1.5 block">

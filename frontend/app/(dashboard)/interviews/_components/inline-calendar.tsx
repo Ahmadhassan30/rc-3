@@ -17,6 +17,7 @@ import { formatTime } from "@/lib/format";
 import { InterviewActions } from "./interview-actions";
 import { MonthYearPicker } from "./month-year-picker";
 import { dayKey, groupByDay, monthGrid } from "../_lib/calendar-utils";
+import { isJitsiMeetingUrl } from "@/lib/jitsi";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MAX_CHIPS = 2;
@@ -75,12 +76,12 @@ function PanelItem({
         </span>
         {iv.meetingUrl && iv.status === "scheduled" && (
           <a
-            href={iv.meetingUrl}
-            target="_blank"
-            rel="noreferrer"
+            href={isJitsiMeetingUrl(iv.meetingUrl) ? `/interviews/video?url=${encodeURIComponent(iv.meetingUrl)}` : iv.meetingUrl}
+            target={isJitsiMeetingUrl(iv.meetingUrl) ? undefined : "_blank"}
+            rel={isJitsiMeetingUrl(iv.meetingUrl) ? undefined : "noreferrer"}
             className="ml-auto font-medium text-theme underline underline-offset-4 dark:text-primary"
           >
-            Join meeting
+            {isJitsiMeetingUrl(iv.meetingUrl) ? "Join video call" : "Join meeting"}
           </a>
         )}
       </div>

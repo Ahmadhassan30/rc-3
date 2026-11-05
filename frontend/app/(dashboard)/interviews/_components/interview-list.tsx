@@ -7,6 +7,7 @@ import type { InterviewListItem } from "@/types";
 import { OUTCOME_CONFIG, STATUS_CONFIG, fmtTimeRange } from "../../_lib/interview-display";
 import { InterviewActions } from "./interview-actions";
 import { dayKey, groupByDay } from "../_lib/calendar-utils";
+import { isJitsiMeetingUrl } from "@/lib/jitsi";
 
 interface InterviewListProps {
   interviews: InterviewListItem[];
@@ -96,12 +97,12 @@ export function InterviewList({ interviews, onFeedback, onEdit }: InterviewListP
                     )}
                     {iv.meetingUrl && iv.status === "scheduled" && (
                       <a
-                        href={iv.meetingUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                        href={isJitsiMeetingUrl(iv.meetingUrl) ? `/interviews/video?url=${encodeURIComponent(iv.meetingUrl)}` : iv.meetingUrl}
+                        target={isJitsiMeetingUrl(iv.meetingUrl) ? undefined : "_blank"}
+                        rel={isJitsiMeetingUrl(iv.meetingUrl) ? undefined : "noreferrer"}
                         className="font-medium text-theme underline underline-offset-4 dark:text-primary"
                       >
-                        Join meeting
+                        {isJitsiMeetingUrl(iv.meetingUrl) ? "Join video call" : "Join meeting"}
                       </a>
                     )}
                   </div>
