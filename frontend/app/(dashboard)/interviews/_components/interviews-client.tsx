@@ -50,6 +50,7 @@ export default function InterviewsClient() {
   const [editTarget, setEditTarget] = useState<InterviewListItem | null>(null);
   const [editEventName, setEditEventName] = useState("");
   const [editMeetingUrl, setEditMeetingUrl] = useState("");
+  const [editEventType, setEditEventType] = useState("virtual");
   const [editOutcome, setEditOutcome] = useState("pending");
   const [editStatus, setEditStatus] = useState("");
 
@@ -84,6 +85,7 @@ export default function InterviewsClient() {
     setEditTarget(iv);
     setEditEventName(iv.eventName || "");
     setEditMeetingUrl(iv.meetingUrl || "");
+    setEditEventType(iv.eventType || "virtual");
     setEditOutcome(iv.outcome || "pending");
     setEditStatus(iv.status || "");
     setEditDialogOpen(true);
@@ -235,6 +237,8 @@ export default function InterviewsClient() {
         onEventNameChange={setEditEventName}
         meetingUrl={editMeetingUrl}
         onMeetingUrlChange={setEditMeetingUrl}
+        eventType={editEventType}
+        onEventTypeChange={setEditEventType}
         status={editStatus}
         onStatusChange={setEditStatus}
         outcome={editOutcome}

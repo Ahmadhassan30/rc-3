@@ -30,6 +30,8 @@ interface EditDialogProps {
   onEventNameChange: (v: string) => void;
   meetingUrl: string;
   onMeetingUrlChange: (v: string) => void;
+  eventType: string;
+  onEventTypeChange: (v: string) => void;
   status: string;
   onStatusChange: (v: string) => void;
   outcome: string;
@@ -44,6 +46,8 @@ export function EditDialog({
   onEventNameChange,
   meetingUrl,
   onMeetingUrlChange,
+  eventType,
+  onEventTypeChange,
   status,
   onStatusChange,
   outcome,
@@ -68,6 +72,25 @@ export function EditDialog({
         <div className="space-y-4 mt-1">
           <div>
             <Label className="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-1.5 block">
+              Interview format
+            </Label>
+            <Select value={eventType} onValueChange={(v) => {
+              const next = v || "virtual";
+              onEventTypeChange(next);
+              if (next === "onsite") onMeetingUrlChange("");
+            }}>
+              <SelectTrigger className="h-8 w-full rounded-md border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-none text-sm focus:ring-0 focus-visible:ring-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="rounded-md border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900">
+                <SelectItem value="virtual">Virtual video interview</SelectItem>
+                <SelectItem value="onsite">On-site interview</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {eventType !== "onsite" && (
+          <div>
+            <Label className="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-1.5 block">
               Event name
             </Label>
             <Input
@@ -76,7 +99,7 @@ export function EditDialog({
               placeholder="e.g. Technical Interview"
               className="h-8 rounded-md border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-none text-sm focus-visible:ring-1 focus-visible:ring-[var(--theme-color)] focus-visible:border-[var(--theme-color)]"
             />
-            {target?.eventType !== "onsite" && !meetingUrl && (
+            {!meetingUrl && (
               <Button
                 type="button"
                 variant="cancel"
@@ -87,6 +110,7 @@ export function EditDialog({
               </Button>
             )}
           </div>
+          )}
           <div>
             <Label className="text-sm font-medium text-slate-600 dark:text-neutral-400 mb-1.5 block">
               Meeting URL
@@ -157,6 +181,7 @@ export function EditDialog({
                 await updateInterviewMutation.mutateAsync({
                   id: target.id,
                   eventName: eventName || undefined,
+                  eventType: eventType as "virtual" | "onsite",
                   meetingUrl: meetingUrl || null,
                   status: (status || undefined) as
                     | "pending_schedule"

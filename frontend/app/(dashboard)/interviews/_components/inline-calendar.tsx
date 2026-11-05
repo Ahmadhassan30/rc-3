@@ -247,6 +247,13 @@ export function InlineCalendar({
                       <span className="truncate font-medium text-slate-700 dark:text-neutral-300">
                         {iv.candidateName?.split(" ")[0]}
                       </span>
+                      {iv.eventType !== "onsite" && (
+                        <HugeiconsIcon
+                          icon={Video01Icon}
+                          className="ml-auto size-3.5 shrink-0 text-theme dark:text-primary"
+                          strokeWidth={1.75}
+                        />
+                      )}
                     </span>
                   ))}
                 </span>
