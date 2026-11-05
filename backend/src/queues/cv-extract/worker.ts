@@ -9,6 +9,7 @@ import { cvTextService } from "../../modules/candidate/cv-text.service";
 import { r2Service } from "../../shared/services/r2.service";
 import logger from "../../utils/logger";
 import { requestEmbeddingIndex } from "../orbit-embedding/queue";
+import { indexingService } from "../../modules/orbit/indexing.service";
 
 export function startCvExtractWorker(): Worker<CvExtractJobData> {
   const worker = new Worker<CvExtractJobData>(
@@ -37,6 +38,11 @@ export function startCvExtractWorker(): Worker<CvExtractJobData> {
         if (cv.status === "done" && cv.evidence) {
           requestEmbeddingIndex({ candidateId, resumeKey, sourceHash: cv.evidence.sourceHash }).catch((error) => {
             logger.error(`[orbit-embedding] enqueue failed candidate=${candidateId}: ${error instanceof Error ? error.message : String(error)}`);
+            return indexingService.markFailed(
+              candidateId,
+              cv.evidence!.sourceHash,
+              error instanceof Error ? error.message : String(error),
+            );
           });
         }
         logger.info(

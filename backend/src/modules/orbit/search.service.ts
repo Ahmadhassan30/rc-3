@@ -1,10 +1,11 @@
-import { and, eq } from "drizzle-orm";
-import { candidates, db, orbitCandidateEvidence, orbitPassageEmbeddings } from "../../db";
+import { and, eq, inArray } from "drizzle-orm";
+import { candidates, db, jobHiringTeam, orbitCandidateEvidence, orbitPassageEmbeddings } from "../../db";
 import { canViewCandidate, canViewJob } from "../../shared/auth/job-access";
 import type { AuthenticatedUser } from "../../shared/auth/verify-token";
 import { cosineSimilarity, embeddingService } from "./embedding.service";
 
 export type SemanticSearchFilters = { candidateId?: number; jobId?: number; section?: string; limit: number };
+const MAX_SEARCH_CORPUS = 5000;
 
 export const searchService = {
   async search(user: AuthenticatedUser, query: string, filters: SemanticSearchFilters) {
@@ -14,6 +15,17 @@ export const searchService = {
     const conditions = [];
     if (filters.candidateId !== undefined) conditions.push(eq(orbitPassageEmbeddings.candidateId, filters.candidateId));
     if (filters.section) conditions.push(eq(orbitPassageEmbeddings.section, filters.section));
+    conditions.push(
+      eq(orbitCandidateEvidence.embeddingStatus, "completed"),
+      eq(orbitPassageEmbeddings.embeddingVersion, embeddingService.metadata.version),
+    );
+    if (filters.jobId !== undefined) conditions.push(eq(candidates.jobId, filters.jobId));
+    if (filters.candidateId === undefined && filters.jobId === undefined && user.role !== "super_admin") {
+      const visibleJobs = await db.select({ jobId: jobHiringTeam.jobId }).from(jobHiringTeam)
+        .where(eq(jobHiringTeam.userId, user.id));
+      if (!visibleJobs.length) return [];
+      conditions.push(inArray(candidates.jobId, visibleJobs.map((job) => job.jobId)));
+    }
     const rows = await db.select({
       embedding: orbitPassageEmbeddings,
       jobId: candidates.jobId,
@@ -22,12 +34,12 @@ export const searchService = {
     }).from(orbitPassageEmbeddings)
       .innerJoin(candidates, eq(candidates.id, orbitPassageEmbeddings.candidateId))
       .innerJoin(orbitCandidateEvidence, eq(orbitCandidateEvidence.candidateId, orbitPassageEmbeddings.candidateId))
-      .where(and(...conditions));
+      .where(and(...conditions))
+      .limit(MAX_SEARCH_CORPUS);
     const authorized = [];
     for (const row of rows) {
       if (row.currentResumeKey !== row.embedding.resumeKey || row.evidence.sourceHash !== row.embedding.sourceHash) continue;
       if (filters.jobId !== undefined && row.jobId !== filters.jobId) continue;
-      if (filters.jobId === undefined && filters.candidateId === undefined && !(await canViewJob(user, row.jobId))) continue;
       const passage = row.evidence.passages.find((item) => item.id === row.embedding.passageId);
       if (!passage) continue;
       const facts = row.evidence.facts.filter((fact) => fact.passageId === passage.id);
