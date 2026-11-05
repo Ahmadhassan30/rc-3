@@ -23,6 +23,7 @@ const JOB_TABS = [
   { value: "custom-questions", label: "Custom Questions" },
   { value: "assessments", label: "Assessments" },
   { value: "scoring", label: "Scoring" },
+  { value: "ai-ranking", label: "AI Ranking" },
 ];
 
 export default function JobDetailsPage() {
@@ -69,7 +70,10 @@ export default function JobDetailsPage() {
   }, [jobId, queryClient]);
 
   const [isNotesOpen, setIsNotesOpen] = useState(false);
-  const [activeJobTab, setActiveJobTab] = useState("overview");
+  const searchParams = useSearchParams();
+  const [activeJobTab, setActiveJobTab] = useState(
+    searchParams.get("tab") === "ai-ranking" ? "ai-ranking" : "overview",
+  );
 
   const { data: jobData, isLoading: jobLoading } = useJob(jobId);
   const { data: jobCandidatesData, isPending: jobCandidatesPending } =

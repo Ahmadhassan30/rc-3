@@ -7,6 +7,7 @@ import { HiringProcessTab } from "./tabs/hiring-process-tab";
 import { CustomQuestionsTab } from "./tabs/custom-questions-tab";
 import { ScoringTab } from "./tabs/scoring-tab";
 import { AssessmentsTab } from "./tabs/assessments-tab";
+import { AiRankingTab } from "./tabs/ai-ranking-tab";
 import type { JobDetail } from "@/types";
 
 interface JobTabsProps {
@@ -50,6 +51,10 @@ export function JobTabs({ jobId, job, jobLoading }: JobTabsProps) {
 
       <TabsContent value="assessments" className="pt-2 space-y-5">
         <AssessmentsTab jobId={jobId} />
+      </TabsContent>
+
+      <TabsContent value="ai-ranking" className="pt-2">
+        <AiRankingTab jobId={jobId} />
       </TabsContent>
     </div>
   );

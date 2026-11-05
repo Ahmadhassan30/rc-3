@@ -10,6 +10,7 @@ import { requirementService, requirementsInput, RequirementsConflictError } from
 import { searchService } from "./search.service";
 import { assessmentService } from "./assessment.service";
 import { requestAssessment } from "../../queues/orbit-assessment/queue";
+import { interviewQuestionService, InterviewQuestionsUnavailableError } from "./interview-questions";
 import { candidates, db } from "../../db";
 import { eq } from "drizzle-orm";
 
@@ -134,6 +135,20 @@ router.post("/jobs/:jobId/requirements/:version/approve", requireManager, requir
   } catch (error) {
     if (error instanceof RequirementsConflictError) return void res.status(409).json({ error: error.message });
     failure(res, error, "Failed to approve job requirements");
+  }
+});
+
+/** Recruiter-only. Reads approved requirements and verified evidence; never changes scores or stages. */
+router.post("/candidates/:candidateId/interview-questions", requireManager, requireCandidateView(), async (req: Request, res: Response) => {
+  const candidateId = positiveId(req.params.candidateId);
+  if (!candidateId) return void res.status(400).json({ error: "Invalid candidate id" });
+  try {
+    const data = await interviewQuestionService.generate(candidateId);
+    if (!data) return void res.status(404).json({ error: "Candidate not found" });
+    res.json({ data });
+  } catch (error) {
+    if (error instanceof InterviewQuestionsUnavailableError) return void res.status(409).json({ error: error.message });
+    failure(res, error, "Failed to generate interview questions");
   }
 });
 
