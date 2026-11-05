@@ -319,7 +319,7 @@ function SchedulerForm({
             </FormField>
           )}
 
-          {templateId && eventType === "virtual" && (
+          {eventType === "virtual" && (
             <div className="space-y-2.5">
               <Label className="text-sm font-medium text-slate-800 dark:text-neutral-200">
                 Meeting link

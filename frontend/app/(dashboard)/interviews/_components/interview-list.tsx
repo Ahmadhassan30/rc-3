@@ -92,6 +92,15 @@ export function InterviewList({ interviews, onFeedback, onEdit }: InterviewListP
                       />
                       {onsite ? "On-site" : "Virtual"}
                     </span>
+                    {!onsite && !iv.meetingUrl && (
+                      <button
+                        type="button"
+                        onClick={() => onEdit(iv)}
+                        className="font-medium text-theme underline underline-offset-4 dark:text-primary"
+                      >
+                        Generate video room
+                      </button>
+                    )}
                     {outcome && (
                       <span className={`rounded-md px-2 py-0.5 text-xs font-semibold ${outcome.badge}`}>{outcome.label}</span>
                     )}

@@ -74,6 +74,15 @@ function PanelItem({
           />
           {onsite ? "On-site" : "Virtual"}
         </span>
+        {!onsite && !iv.meetingUrl && (
+          <button
+            type="button"
+            onClick={() => onEdit(iv)}
+            className="font-medium text-theme underline underline-offset-4 dark:text-primary"
+          >
+            Generate video room
+          </button>
+        )}
         {iv.meetingUrl && iv.status === "scheduled" && (
           <a
             href={isJitsiMeetingUrl(iv.meetingUrl) ? `/interviews/video?url=${encodeURIComponent(iv.meetingUrl)}` : iv.meetingUrl}
