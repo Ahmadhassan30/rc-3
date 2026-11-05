@@ -37,6 +37,7 @@ import { startCvExtractWorker } from "../../src/queues/cv-extract/worker";
 import { startOrbitEmbeddingWorker } from "../../src/queues/orbit-embedding/worker";
 import { startOrbitAssessmentWorker } from "../../src/queues/orbit-assessment/worker";
 import { cvExtractQueue } from "../../src/queues/cv-extract/queue";
+import { indexingService } from "../../src/modules/orbit/indexing.service";
 import { cvTextService } from "../../src/modules/candidate/cv-text.service";
 import { extractCvText } from "../../src/modules/candidate/cv-text";
 import { verifyQuote } from "../../src/modules/orbit/evidence";
@@ -224,6 +225,11 @@ describe("Orbit real PDF integration", () => {
     const stale = await request(app).get(`/api/orbit/candidates/${candidateId}/evidence`).set("Authorization", adminAuth);
     expect(stale.body.data.source).toBeNull();
     await db.update(candidates).set({ resumeKey }).where(eq(candidates.id, candidateId));
+    await cvTextService.markPending(candidateId, resumeKey);
+    await cvTextService.save(candidateId, resumeKey, await extractCvText(pdf));
+    await indexingService.indexCandidate(candidateId, resumeKey, snapshot!.sourceHash);
+    await indexingService.markCompleted(candidateId, snapshot!.sourceHash);
+    await waitForEmbeddings();
   }, 30_000);
 
   it("versions and approves job requirements only through authorized routes", async () => {
