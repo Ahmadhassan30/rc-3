@@ -2,7 +2,7 @@
 export const currentTime = () => Date.now();
 
 export type EventType = "virtual" | "onsite";
-export type LinkMode = "auto" | "manual";
+export type LinkMode = "auto" | "jitsi" | "manual";
 
 /** Valid and in the future */
 export function isFutureSlot(datetime: string, now: number): boolean {

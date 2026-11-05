@@ -44,6 +44,7 @@ import {
   type TimeMode,
 } from "../_lib/scheduler-utils";
 import { formatDuration } from "../_lib/format-duration";
+import { createJitsiMeetingUrl, JITSI_DOMAIN } from "@/lib/jitsi";
 
 interface Template {
   id: number;
@@ -123,7 +124,11 @@ function SchedulerForm({
   const googleConnected =
     statusData?.data.find((s) => s.provider === "google_meet")?.connected ?? false;
   // Google links need the interviewer to connect Google
-  const linkMode: LinkMode = linkChoice === "auto" && googleConnected ? "auto" : "manual";
+  const linkMode: LinkMode = linkChoice === "auto" && googleConnected
+    ? "auto"
+    : linkChoice === "jitsi"
+      ? "jitsi"
+      : "manual";
 
   // The chosen interviewer's other interviews: a time is taken if this one would overlap any.
   const { data: allocatedData } = useAllocatedSlots(interviewerId);
@@ -166,6 +171,10 @@ function SchedulerForm({
     }
 
     const autoGenerate = eventType === "virtual" && linkMode === "auto";
+    const jitsiGenerate = eventType === "virtual" && linkMode === "jitsi";
+    const jitsiRoom = jitsiGenerate
+      ? `orbit-${crypto.randomUUID().replaceAll("-", "")}`
+      : null;
     const fixed = timeMode === "fixed";
     const usable = fixed ? [] : slots.filter((s) => s && isFutureSlot(s, submittedAt));
 
@@ -176,7 +185,11 @@ function SchedulerForm({
         body: JSON.stringify({
           eventName: eventTemplates.find((t) => String(t.id) === templateId)?.name.trim(),
           eventType,
-          meetingUrl: eventType === "virtual" && !autoGenerate ? meetingUrl.trim() || null : null,
+          meetingUrl: jitsiRoom
+            ? createJitsiMeetingUrl(jitsiRoom)
+            : eventType === "virtual" && !autoGenerate
+              ? meetingUrl.trim() || null
+              : null,
           meetingProvider: autoGenerate ? "google_meet" : undefined,
           interviewerId,
           location: eventType === "onsite" ? location.trim() || null : null,
@@ -335,6 +348,17 @@ function SchedulerForm({
                       {googleConnected
                         ? "Made automatically once the time is set."
                         : "Choose an interviewer who has connected Google Meet to use this."}
+                    </span>
+                  </span>
+                </label>
+                <label className="flex cursor-pointer items-start gap-3 text-sm">
+                  <RadioGroupItem variant="theme" value="jitsi" className="mt-0.5" />
+                  <span>
+                    <span className="font-medium text-slate-900 dark:text-neutral-100">
+                      Create an Orbit video room
+                    </span>
+                    <span className="block text-slate-500 dark:text-neutral-400">
+                      Uses Jitsi on {JITSI_DOMAIN}. The room link is saved with this interview.
                     </span>
                   </span>
                 </label>

@@ -29,6 +29,7 @@ import {
 } from "../../_lib/interview-utils";
 import { InterviewFeedbackDialog } from "./interview-feedback-dialog";
 import type { CandidateInterview } from "@/types";
+import { isJitsiMeetingUrl } from "@/lib/jitsi";
 
 interface InterviewCardProps {
   interview: CandidateInterview;
@@ -189,7 +190,13 @@ export function InterviewCard({
         <div className="flex items-center gap-2">
           {upcoming && meetingUrl && interview.status === "scheduled" && (
             <Button
-              render={<a href={meetingUrl} target="_blank" rel="noopener noreferrer" />}
+              render={
+                <a
+                  href={isJitsiMeetingUrl(meetingUrl) ? `/interviews/video?url=${encodeURIComponent(meetingUrl)}` : meetingUrl}
+                  target={isJitsiMeetingUrl(meetingUrl) ? undefined : "_blank"}
+                  rel={isJitsiMeetingUrl(meetingUrl) ? undefined : "noopener noreferrer"}
+                />
+              }
               className="h-9 gap-2 border-none bg-theme px-4 text-sm font-semibold text-white hover:bg-theme-hover"
             >
               <HugeiconsIcon icon={Video01Icon} className="size-4" strokeWidth={1.75} />
