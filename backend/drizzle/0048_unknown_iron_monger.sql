@@ -1,0 +1,2 @@
+ALTER TABLE "orbit_candidate_evidence" ADD COLUMN "embedding_status" varchar(16) DEFAULT 'pending' NOT NULL;--> statement-breakpoint
+ALTER TABLE "orbit_candidate_evidence" ADD COLUMN "embedding_error" text;

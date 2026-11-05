@@ -52,6 +52,9 @@ importers:
       '@google/genai':
         specifier: ^2.31.0
         version: 2.31.0(@modelcontextprotocol/sdk@1.32.1(supports-color@5.5.0)(zod@4.6.7))(supports-color@5.5.0)
+      '@huggingface/transformers':
+        specifier: 4.3.2
+        version: 4.3.2(@types/node@26.6.5)
       bullmq:
         specifier: ^6.4.0
         version: 6.4.0(ioredis@6.0.0(supports-color@5.5.0))(pg@8.23.1)
@@ -119,9 +122,6 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@9.39.5(jiti@2.7.0)(supports-color@5.5.0))
-      '@huggingface/transformers':
-        specifier: 4.3.2
-        version: 4.3.2(@types/node@26.6.5)
       '@types/cors':
         specifier: ^2.8.19
         version: 2.8.19

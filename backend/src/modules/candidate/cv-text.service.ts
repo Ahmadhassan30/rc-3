@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
-import { candidateCvText, candidates, db, orbitCandidateEvidence } from "../../db";
+import { candidateCvText, candidates, db, orbitCandidateEvidence, orbitPassageEmbeddings } from "../../db";
 import { EXTRACTOR_VERSION, type ExtractedCv } from "./cv-text";
 import { normalizeForSearch } from "./cv-text/normalize-search";
 import { buildCvProfile } from "./cv-text/profile";
@@ -78,6 +78,7 @@ export const cvTextService = {
       await tx.insert(candidateCvText).values({ candidateId, ...reset })
         .onConflictDoUpdate({ target: candidateCvText.candidateId, set: reset });
       await tx.delete(orbitCandidateEvidence).where(eq(orbitCandidateEvidence.candidateId, candidateId));
+      await tx.delete(orbitPassageEmbeddings).where(eq(orbitPassageEmbeddings.candidateId, candidateId));
     });
   },
 
@@ -119,12 +120,14 @@ export const cvTextService = {
         const values = {
           candidateId, resumeKey, sourceHash: cv.evidence.sourceHash,
           extractorVersion: cv.evidence.extractorVersion, pages: cv.evidence.pages,
-          passages: cv.evidence.passages, facts: cv.evidence.facts, updatedAt: new Date(),
+          passages: cv.evidence.passages, facts: cv.evidence.facts,
+          embeddingStatus: "pending", embeddingError: null, updatedAt: new Date(),
         };
         await tx.insert(orbitCandidateEvidence).values(values)
           .onConflictDoUpdate({ target: orbitCandidateEvidence.candidateId, set: values });
       } else {
         await tx.delete(orbitCandidateEvidence).where(eq(orbitCandidateEvidence.candidateId, candidateId));
+        await tx.delete(orbitPassageEmbeddings).where(eq(orbitPassageEmbeddings.candidateId, candidateId));
       }
     });
   },

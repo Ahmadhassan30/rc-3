@@ -27,6 +27,8 @@ export const orbitService = {
       error: cv?.resumeKey === candidate.resumeKey && cv.status === "failed" ? "CV extraction failed; inspect the resume and retry the existing extraction workflow" : null,
       extractorVersion: current?.extractorVersion ?? cv?.extractorVersion ?? null,
       updatedAt: current?.updatedAt ?? cv?.updatedAt ?? null,
+      embeddingStatus: current?.embeddingStatus ?? null,
+      embeddingError: current?.embeddingError ?? null,
       source: current ? {
         documentId: current.sourceHash,
         sourceHash: current.sourceHash,

@@ -31,9 +31,10 @@ import { company, departments } from "../../src/db/schema/company";
 import { jobs } from "../../src/db/schema/jobs";
 import { jobPipelineStages } from "../../src/db/schema/pipeline";
 import { candidates } from "../../src/db/schema/candidates";
-import { orbitCandidateEvidence, orbitEvidenceOverrides } from "../../src/db/schema/orbit";
+import { orbitCandidateEvidence, orbitEvidenceOverrides, orbitPassageEmbeddings } from "../../src/db/schema/orbit";
 import { users } from "../../src/db/schema/users";
 import { startCvExtractWorker } from "../../src/queues/cv-extract/worker";
+import { startOrbitEmbeddingWorker } from "../../src/queues/orbit-embedding/worker";
 import { cvExtractQueue } from "../../src/queues/cv-extract/queue";
 import { cvTextService } from "../../src/modules/candidate/cv-text.service";
 import { extractCvText } from "../../src/modules/candidate/cv-text";
@@ -65,6 +66,7 @@ const pdf = buildPdf([
 
 let storageDir: string;
 let worker: ReturnType<typeof startCvExtractWorker>;
+let embeddingWorker: ReturnType<typeof startOrbitEmbeddingWorker>;
 let companyId: number, departmentId: number, jobId: number, candidateId: number;
 let adminId: number, outsiderId: number;
 let adminAuth: string, outsiderAuth: string;
@@ -92,11 +94,14 @@ beforeAll(async () => {
   jobId = job!.id;
   await db.insert(jobPipelineStages).values({ jobId, name: "Applied", position: 0 });
   worker = startCvExtractWorker();
+  embeddingWorker = startOrbitEmbeddingWorker();
   await worker.waitUntilReady();
+  await embeddingWorker.waitUntilReady();
 }, 30_000);
 
 afterAll(async () => {
   await worker?.close();
+    await embeddingWorker?.close();
   if (candidateId) await db.delete(candidates).where(eq(candidates.id, candidateId));
   await db.delete(jobs).where(eq(jobs.id, jobId));
   await db.delete(users).where(eq(users.id, outsiderId));
@@ -122,6 +127,15 @@ async function waitForEvidence() {
   throw new Error(`The real CV worker did not persist Orbit evidence within 20 seconds: ${JSON.stringify(counts)}, failed=${failed.map((job) => job.failedReason).join(";")}`);
 }
 
+async function waitForEmbeddings() {
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const rows = await db.select().from(orbitPassageEmbeddings).where(eq(orbitPassageEmbeddings.candidateId, candidateId));
+    if (rows.length > 0) return rows;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("The real BGE worker did not persist passage embeddings within 30 seconds");
+}
+
 describe("Orbit real PDF integration", () => {
   it("uploads privately, applies publicly, and extracts source-linked evidence through the worker", async () => {
     const uploaded = await request(app).post("/public/upload/resume")
@@ -135,8 +149,11 @@ describe("Orbit real PDF integration", () => {
     });
     expect(applied.status).toBe(201);
     const snapshot = await waitForEvidence();
+      const embeddings = await waitForEmbeddings();
     expect(await r2Service.getResume(resumeKey)).toEqual(pdf);
     expect(snapshot.pages).toHaveLength(2);
+      expect(embeddings[0]!.vector).toHaveLength(384);
+      expect(embeddings[0]!.sourceHash).toBe(snapshot.sourceHash);
     expect(snapshot.facts.some((f) => f.label === "JavaScript" && f.state === "MENTIONED_ONLY")).toBe(true);
     expect(snapshot.facts.some((f) => f.label === "PostgreSQL" && f.state === "SUPPORTED")).toBe(true);
     expect(snapshot.facts.some((f) => f.label === "Docker" && f.state === "NEGATED")).toBe(true);
@@ -162,6 +179,14 @@ describe("Orbit real PDF integration", () => {
     expect(status.status).toBe(200);
     expect(status.body.data.evidenceReady).toBe(true);
     expect(status.body.data.source).toBeUndefined();
+    const unauthorizedSearch = await request(app).get("/api/orbit/search").query({ query: "REST API", candidateId }).set("Authorization", outsiderAuth);
+    expect(unauthorizedSearch.status).toBe(403);
+    const search = await request(app).get("/api/orbit/search").query({ query: "Python Flask APIs", candidateId }).set("Authorization", adminAuth);
+    expect(search.status).toBe(200);
+    expect(search.body.data[0].candidateId).toBe(candidateId);
+    expect(search.body.data[0].excerpt).toContain("APIs");
+    expect(search.body.data[0].embeddingModel).toBe("onnx-community/bge-small-en-v1.5-ONNX");
+    expect(search.body.data[0].warning).toContain("does not verify proficiency");
   });
 
   it("keeps human overrides separate, reprocessing idempotent, and rejects stale CV results", async () => {
@@ -176,7 +201,10 @@ describe("Orbit real PDF integration", () => {
     expect(after!.facts).toEqual(snapshot!.facts);
     const overrides = await db.select().from(orbitEvidenceOverrides).where(eq(orbitEvidenceOverrides.candidateId, candidateId));
     expect(overrides).toHaveLength(1);
-    await db.update(candidates).set({ resumeKey: "resumes/11111111-2222-4333-8444-555555555555.pdf" }).where(eq(candidates.id, candidateId));
+    const replacementKey = "resumes/11111111-2222-4333-8444-555555555555.pdf";
+    await db.update(candidates).set({ resumeKey: replacementKey }).where(eq(candidates.id, candidateId));
+    await cvTextService.markPending(candidateId, replacementKey);
+    expect(await db.select().from(orbitPassageEmbeddings).where(eq(orbitPassageEmbeddings.candidateId, candidateId))).toHaveLength(0);
     await cvTextService.save(candidateId, resumeKey, await extractCvText(pdf));
     const stale = await request(app).get(`/api/orbit/candidates/${candidateId}/evidence`).set("Authorization", adminAuth);
     expect(stale.body.data.source).toBeNull();
@@ -213,6 +241,7 @@ describe("Orbit real PDF integration", () => {
     const overrides = await db.select().from(orbitEvidenceOverrides).where(eq(orbitEvidenceOverrides.candidateId, candidateId));
     expect(snapshots).toHaveLength(0);
     expect(overrides).toHaveLength(0);
+    expect(await db.select().from(orbitPassageEmbeddings).where(eq(orbitPassageEmbeddings.candidateId, candidateId))).toHaveLength(0);
     await r2Service.deleteResume(resumeKey);
     candidateId = 0;
   });

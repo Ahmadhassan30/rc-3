@@ -330,6 +330,20 @@
       "when": 1793866570305,
       "tag": "0046_violet_captain_america",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793869838568,
+      "tag": "0047_silly_nightshade",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1793870741460,
+      "tag": "0048_unknown_iron_monger",
+      "breakpoints": true
     }
   ]
 }

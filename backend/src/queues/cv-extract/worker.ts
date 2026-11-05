@@ -8,6 +8,7 @@ import { extractCvTextWithTimeout } from "../../modules/candidate/cv-text/extrac
 import { cvTextService } from "../../modules/candidate/cv-text.service";
 import { r2Service } from "../../shared/services/r2.service";
 import logger from "../../utils/logger";
+import { requestEmbeddingIndex } from "../orbit-embedding/queue";
 
 export function startCvExtractWorker(): Worker<CvExtractJobData> {
   const worker = new Worker<CvExtractJobData>(
@@ -33,6 +34,11 @@ export function startCvExtractWorker(): Worker<CvExtractJobData> {
         // On its own thread with a time limit, so one file cannot hold up every other CV.
         const cv = await extractCvTextWithTimeout(file);
         await cvTextService.save(candidateId, resumeKey, cv);
+        if (cv.status === "done" && cv.evidence) {
+          requestEmbeddingIndex({ candidateId, resumeKey, sourceHash: cv.evidence.sourceHash }).catch((error) => {
+            logger.error(`[orbit-embedding] enqueue failed candidate=${candidateId}: ${error instanceof Error ? error.message : String(error)}`);
+          });
+        }
         logger.info(
           `[cv-extract] candidate=${candidateId} status=${cv.status} pages=${cv.pageCount} chars=${cv.text.length}`,
         );
